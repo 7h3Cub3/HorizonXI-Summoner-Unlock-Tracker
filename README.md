@@ -1,0 +1,187 @@
+# HorizonXI Summoner Unlock Tracker
+
+A local browser-based helper for the HorizonXI Summoner unlock quest **I Can Hear a Rainbow**.
+
+The repository contains the full source and can be built into a single Windows EXE with PyInstaller.
+
+## Repository layout
+
+```text
+src/
+  weather_server.py
+  Carbuncle_Rainbow_Tracker.html
+HorizonXI_Summoner_Unlock_Tracker.spec
+version_info.txt
+requirements-build.txt
+build_exe.bat
+run_source.bat
+.github/workflows/release.yml
+```
+
+## Run from source
+
+Python 3 is required. No third-party runtime modules are needed.
+
+From Windows CMD:
+
+```bat
+run_source.bat
+```
+
+or:
+
+```bat
+py -3 src\weather_server.py
+```
+
+The local server opens the tracker in your default browser.
+
+## Build the Windows EXE
+
+The easiest method is:
+
+```bat
+build_exe.bat
+```
+
+This creates a local virtual environment, installs PyInstaller, and builds:
+
+```text
+dist\HorizonXI_Summoner_Unlock_Tracker.exe
+```
+
+The EXE contains the HTML file. Python is not required on the machine that runs the built EXE.
+
+### Manual build commands
+
+From Windows CMD in the repository root:
+
+```bat
+py -3 -m venv .venv
+call .venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements-build.txt
+python -m PyInstaller --noconfirm --clean HorizonXI_Summoner_Unlock_Tracker.spec
+```
+
+## Put the source on GitHub from CMD
+
+Install Git and GitHub CLI if needed:
+
+```bat
+winget install --id Git.Git -e
+winget install --id GitHub.cli -e
+```
+
+Open a new CMD after installation, then authenticate:
+
+```bat
+gh auth login
+```
+
+In the project directory:
+
+```bat
+git init
+git add .
+git commit -m "Initial release"
+git branch -M main
+gh repo create HorizonXI-Summoner-Unlock-Tracker --public --source=. --remote=origin --push
+```
+
+If you already created an empty repository on GitHub instead, use:
+
+```bat
+git init
+git add .
+git commit -m "Initial release"
+git branch -M main
+git remote add origin https://github.com/YOUR_GITHUB_NAME/HorizonXI-Summoner-Unlock-Tracker.git
+git push -u origin main
+```
+
+## Build locally and publish the EXE as a GitHub Release
+
+First build:
+
+```bat
+build_exe.bat
+```
+
+Commit and push any source changes:
+
+```bat
+git add .
+git commit -m "Release v15.0.0"
+git push
+```
+
+Create and push the version tag:
+
+```bat
+git tag v15.0.0
+git push origin v15.0.0
+```
+
+Then create the Release and upload the EXE with GitHub CLI:
+
+```bat
+gh release create v15.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v15.0.0" --generate-notes
+```
+
+To replace an EXE already attached to that Release:
+
+```bat
+gh release upload v15.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
+```
+
+To inspect releases:
+
+```bat
+gh release list
+gh release view v15.0.0
+```
+
+## Automatic GitHub build/release
+
+This repository also contains:
+
+```text
+.github/workflows/release.yml
+```
+
+When you push a tag beginning with `v`, GitHub Actions builds the EXE on a Windows runner and creates/uploads the GitHub Release automatically.
+
+Example:
+
+```bat
+git add .
+git commit -m "Release v15.0.0"
+git push
+git tag v15.0.0
+git push origin v15.0.0
+```
+
+With the workflow enabled, you do **not** need to run `gh release create` manually.
+
+## Updating the version
+
+For a new release, update the version in:
+
+- `src/weather_server.py`
+- the visible version badge in `src/Carbuncle_Rainbow_Tracker.html`
+- `version_info.txt`
+
+Then build/test and tag the matching version.
+
+## Runtime data
+
+When running from source, the map cache is stored in the repository `_cache` folder.
+
+When running the one-file EXE, writable cache data is stored under:
+
+```text
+%LOCALAPPDATA%\HorizonXI_Summoner_Unlock_Tracker\_cache
+```
+
+This avoids trying to write into PyInstaller's temporary one-file extraction directory.

@@ -1,0 +1,2 @@
+# Build-only dependency. Runtime EXE has no Python dependency.
+pyinstaller>=6.0,<7.0
