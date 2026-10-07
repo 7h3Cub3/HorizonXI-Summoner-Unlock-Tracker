@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "15.0.0"
+VERSION = "17.0.0"
 APP_NAME = "HorizonXI_Summoner_Unlock_Tracker"
 
 # PyInstaller --onefile extracts bundled files to sys._MEIPASS.
@@ -189,13 +189,13 @@ def source_url(zone_display):
     )
     return WEATHER_SPECIAL + "?" + query
 
-def parse_today(page, expected_zone_value):
+def parse_forecast_days(page, expected_zone_value, max_day=7):
     p = Rows()
     p.feed(page)
 
     # Horizon extension emits:
     # 0 zone
-    # 1 Vana-days from today (0 == today)
+    # 1 Vana-days from today (0 == today, 1 == next Vana day, ...)
     # 2 Earth time
     # 3 Vana weekday
     # 4 Moon phase
@@ -203,29 +203,61 @@ def parse_today(page, expected_zone_value):
     # 6 Common
     # 7 Rare
     data_rows = [r for r in p.rows if len(r) >= 8]
-    today = [r for r in data_rows if clean(r[1]) == "0"]
 
-    # Prefer the row matching the requested internal zone name, but retain a
-    # fallback because display formatting can change independently of values.
-    exact = [
-        r for r in today
-        if clean(r[0]).replace(" ", "_").lower() == expected_zone_value.lower()
-    ]
-    row = exact[0] if exact else (today[0] if today else None)
+    def zone_key(value):
+        return clean(value).replace(" ", "_").lower()
+
+    matching = [r for r in data_rows if zone_key(r[0]) == expected_zone_value.lower()]
+    candidates = matching if matching else data_rows
+
+    days = {}
+    for r in candidates:
+        try:
+            offset = int(clean(r[1]))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= offset <= max_day and offset not in days:
+            days[offset] = {
+                "offset": offset,
+                "earth_time": clean(r[2]),
+                "vana_day": clean(r[3]),
+                "moon": clean(r[4]),
+                "normal": clean(r[5]),
+                "common": clean(r[6]),
+                "rare": clean(r[7]),
+            }
 
     diag = {
         "row_count": len(p.rows),
         "data_row_count": len(data_rows),
-        "today_row_count": len(today),
+        "matching_zone_rows": len(matching),
         "expected_zone_value": expected_zone_value,
+        "available_offsets": sorted(days),
         "first_12_rows": p.rows[:12],
     }
-    if row is None:
-        raise ValueError("No forecast row with Vana-days-from-today = 0. Diagnostics: " +
-                         json.dumps(diag, ensure_ascii=False)[:3000])
 
-    normal, common, rare = clean(row[5]), clean(row[6]), clean(row[7])
-    return normal, common, rare, row, diag
+    if 0 not in days:
+        raise ValueError(
+            "No forecast row with Vana-days-from-today = 0. Diagnostics: " +
+            json.dumps(diag, ensure_ascii=False)[:3000]
+        )
+
+    return days, diag
+
+def parse_today(page, expected_zone_value):
+    days, diag = parse_forecast_days(page, expected_zone_value, max_day=0)
+    d = days[0]
+    row = [
+        expected_zone_value,
+        "0",
+        d["earth_time"],
+        d["vana_day"],
+        d["moon"],
+        d["normal"],
+        d["common"],
+        d["rare"],
+    ]
+    return d["normal"], d["common"], d["rare"], row, diag
 
 def fetch_uncached(zone):
     url = source_url(zone)
@@ -233,14 +265,17 @@ def fetch_uncached(zone):
     try:
         data, meta = fetch(url, referer=DIGGING_SPECIAL)
         page, _encoding = decode(data, meta.get("content_type", ""))
-        normal, common, rare, row, _diag = parse_today(page, qzone)
+        days, _diag = parse_forecast_days(page, qzone, max_day=7)
+        today = days[0]
+        future = [days[i] for i in range(1, 8) if i in days]
         return {
-            "normal": normal,
-            "common": common,
-            "rare": rare,
-            "earth_time": clean(row[2]),
-            "vana_day": clean(row[3]),
-            "moon": clean(row[4]),
+            "normal": today["normal"],
+            "common": today["common"],
+            "rare": today["rare"],
+            "earth_time": today["earth_time"],
+            "vana_day": today["vana_day"],
+            "moon": today["moon"],
+            "future": future,
         }
     except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
@@ -385,7 +420,7 @@ def save_uploaded_map(data, filename, content_type):
     return map_status()
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "HorizonCarbuncleTracker/15"
+    server_version = "HorizonCarbuncleTracker/17"
 
     def log_message(self, fmt, *args):
         log_line("[HTTP] " + (fmt % args))
@@ -506,10 +541,15 @@ def self_test():
     <table>
       <tr><th>Zone</th><th>Vana-days</th><th>Earth Time</th><th>Day</th><th>Moon</th><th>Normal</th><th>Common</th><th>Rare</th></tr>
       <tr><td>Batallia_Downs</td><td>0</td><td>2026-10-06 13:00</td><td>Watersday</td><td>Full Moon</td><td>Clouds</td><td>Dust Storm</td><td>Rain</td></tr>
+      <tr><td>Batallia_Downs</td><td>1</td><td>2026-10-06 13:57</td><td>Windsday</td><td>Full Moon</td><td>Gales</td><td>Clouds</td><td>Rain</td></tr>
+      <tr><td>Batallia_Downs</td><td>7</td><td>2026-10-06 19:43</td><td>Firesday</td><td>Full Moon</td><td>Heat Waves</td><td>Clouds</td><td>Rain</td></tr>
     </table>
     """
     n, c, r, row, diag = parse_today(sample, "Batallia_Downs")
     assert (n, c, r) == ("Clouds", "Dust Storm", "Rain")
+    days, _ = parse_forecast_days(sample, "Batallia_Downs", max_day=7)
+    assert days[1]["normal"] == "Gales"
+    assert days[7]["normal"] == "Heat Waves"
     assert source_url("Batallia Downs").endswith(
         "weatherTypeDropDown=8&zoneNameDropDown=Batallia_Downs"
     )
@@ -520,7 +560,7 @@ def self_test():
 def main():
     self_test()
     log_line(f"[START] HorizonXI Carbuncle Rainbow Tracker v{VERSION}")
-    log_line("[PARSER] weatherTypeDropDown=8; today=row[1]=='0'; weather columns=5,6,7 zero-based")
+    log_line("[PARSER] weatherTypeDropDown=8; forecast offsets 0..7; weather columns=5,6,7 zero-based")
 
     server = None
     port = None
@@ -537,7 +577,7 @@ def main():
 
     url = f"http://127.0.0.1:{port}/"
     print()
-    print("HorizonXI Summoner Unlock Tracker v15")
+    print("HorizonXI Summoner Unlock Tracker v17")
     print("Browser URL:", url)
     print("Press Ctrl+C to stop.")
     print()

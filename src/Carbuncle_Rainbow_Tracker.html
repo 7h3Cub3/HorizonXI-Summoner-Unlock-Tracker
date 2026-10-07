@@ -74,6 +74,19 @@
   }
   .forecast-color-pill .forecast-color-pct{color:#cbd5e1}
   #allForecastBody td{vertical-align:middle}
+  .future-forecast-days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .future-day-card{border:1px solid #2d3a4b;border-radius:10px;background:#101720;overflow:hidden}
+  .future-day-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 11px;background:#151f2b;border-bottom:1px solid #2d3a4b}
+  .future-day-title{font-weight:800;white-space:nowrap}
+  .future-day-countdown{font-size:11px;color:#aebaca;white-space:nowrap}
+  .future-day-body{padding:6px 10px}
+  .future-row{display:grid;grid-template-columns:minmax(118px,auto) minmax(150px,1fr) auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #222e3c}
+  .future-row:last-child{border-bottom:0}
+  .future-zone{min-width:0}
+  .future-zone b{white-space:nowrap}
+  .future-chance{white-space:nowrap;font-weight:800}
+  .future-empty{padding:8px 0;color:#77869a;font-size:12px}
+  @media(max-width:980px){.future-forecast-days{grid-template-columns:1fr}.future-row{grid-template-columns:118px 1fr auto}}
 
   .color-heading{display:inline-flex!important;align-items:center;gap:7px;white-space:nowrap!important;flex-wrap:nowrap!important;margin:0}
   .meta{color:var(--muted);font-size:12px}
@@ -308,6 +321,16 @@
       <button id="scanBtn" class="primary">Scan Horizon forecasts</button>
       <button id="notifyBtn">Enable browser notifications</button>
       <label><input id="soundToggle" type="checkbox"> Sound alert</label>
+      <label>Alert sound:
+        <select id="alertSound">
+          <option value="crystal">Crystal Chime</option>
+          <option value="beacon">Beacon</option>
+          <option value="bell">Bell</option>
+          <option value="ascending">Ascending</option>
+          <option value="urgent">Urgent</option>
+        </select>
+      </label>
+      <button id="testSoundBtn" type="button">Test sound</button>
       <label><input id="autoToggle" type="checkbox" checked> Re-scan about once per Vana'diel day</label>
       <label>Minimum forecast:
         <select id="threshold">
@@ -344,6 +367,21 @@
     <div class="tiny" style="margin-top:8px">
       *Calculated from the Wiki's Normal 50% / Common 35% / Rare 15% columns when the desired weather appears in those columns.
       “No Change” cannot be resolved reliably by this standalone page and is treated as unknown.
+    </div>
+
+    <div class="spacer"></div>
+    <div class="card" style="padding:12px">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <h3 style="margin:0 0 3px 0">Next 7 Vana'diel Days</h3>
+          <div class="meta">Upcoming quest-weather opportunities for colors you still need. Day +1 begins at the next Vana'diel midnight.</div>
+        </div>
+        <span class="pill">Horizon: <b>~6h 43m IRL</b></span>
+      </div>
+      <div class="spacer"></div>
+      <div id="futureForecastStatus" class="tiny muted">Run a forecast scan.</div>
+      <div class="spacer"></div>
+      <div id="futureForecastDays" class="future-forecast-days"></div>
     </div>
 
     <div class="spacer"></div>
@@ -592,7 +630,7 @@ const LS_KEY='hxi-carbuncle-rainbow-v2';
 const SETTINGS_KEY='hxi-carbuncle-rainbow-settings-v2';
 const ALERT_KEY='hxi-carbuncle-rainbow-alerted-v2';
 let state = JSON.parse(localStorage.getItem(LS_KEY)||'{}');
-let settings = Object.assign({sound:false,auto:true,threshold:50}, JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));
+let settings = Object.assign({sound:false,auto:true,threshold:50,alertSound:'crystal'}, JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));
 let alertMemory = JSON.parse(localStorage.getItem(ALERT_KEY)||'{}');
 let autoTimer=null, titleTimer=null, clockTimer=null, nextScanAt=null;
 
@@ -721,10 +759,23 @@ document.getElementById('resetBtn').onclick=()=>{
     renderAllForecasts(window._lastForecasts||{});
   }
 };
+if(!ALERT_SOUND_PATTERNS[settings.alertSound])settings.alertSound='crystal';
 document.getElementById('soundToggle').checked=settings.sound;
+document.getElementById('alertSound').value=settings.alertSound||'crystal';
 document.getElementById('autoToggle').checked=settings.auto;
 document.getElementById('threshold').value=String(settings.threshold);
-document.getElementById('soundToggle').onchange=e=>{settings.sound=e.target.checked;save()};
+document.getElementById('soundToggle').onchange=e=>{
+  settings.sound=e.target.checked;
+  save();
+  if(settings.sound) ensureAudioContext();
+};
+document.getElementById('alertSound').onchange=e=>{
+  settings.alertSound=e.target.value;
+  save();
+};
+document.getElementById('testSoundBtn').onclick=()=>{
+  playAlertSound(settings.alertSound||'crystal', true);
+};
 document.getElementById('autoToggle').onchange=e=>{settings.auto=e.target.checked;save();scheduleAuto()};
 document.getElementById('threshold').onchange=e=>{settings.threshold=+e.target.value;save();filterLastOpportunities()};
 
@@ -736,13 +787,91 @@ document.getElementById('notifyBtn').onclick=async()=>{
   }catch(e){alert('Notification permission could not be requested from this context.');}
 };
 
-function beep(){
-  if(!settings.sound)return;
+let alertAudioContext=null;
+
+const ALERT_SOUND_PATTERNS={
+  crystal:[
+    {f:659.25,t:0.00,d:0.18,v:0.22,type:'sine'},
+    {f:783.99,t:0.16,d:0.20,v:0.24,type:'sine'},
+    {f:1046.50,t:0.33,d:0.38,v:0.28,type:'sine'},
+    {f:1567.98,t:0.35,d:0.30,v:0.08,type:'sine'}
+  ],
+  beacon:[
+    {f:880.00,t:0.00,d:0.19,v:0.24,type:'triangle'},
+    {f:1174.66,t:0.22,d:0.20,v:0.26,type:'triangle'},
+    {f:880.00,t:0.47,d:0.19,v:0.24,type:'triangle'},
+    {f:1318.51,t:0.70,d:0.34,v:0.29,type:'triangle'}
+  ],
+  bell:[
+    {f:783.99,t:0.00,d:0.55,v:0.24,type:'sine'},
+    {f:1567.98,t:0.00,d:0.38,v:0.10,type:'sine'},
+    {f:987.77,t:0.46,d:0.60,v:0.25,type:'sine'},
+    {f:1975.53,t:0.46,d:0.40,v:0.09,type:'sine'}
+  ],
+  ascending:[
+    {f:523.25,t:0.00,d:0.15,v:0.21,type:'triangle'},
+    {f:659.25,t:0.14,d:0.15,v:0.22,type:'triangle'},
+    {f:783.99,t:0.28,d:0.16,v:0.24,type:'triangle'},
+    {f:1046.50,t:0.43,d:0.38,v:0.30,type:'triangle'}
+  ],
+  urgent:[
+    {f:987.77,t:0.00,d:0.16,v:0.28,type:'square'},
+    {f:659.25,t:0.18,d:0.16,v:0.24,type:'square'},
+    {f:987.77,t:0.38,d:0.16,v:0.28,type:'square'},
+    {f:659.25,t:0.56,d:0.16,v:0.24,type:'square'},
+    {f:1174.66,t:0.76,d:0.36,v:0.30,type:'triangle'}
+  ]
+};
+
+function ensureAudioContext(){
   try{
-    const A=window.AudioContext||window.webkitAudioContext, ctx=new A(), o=ctx.createOscillator(), g=ctx.createGain();
-    o.connect(g);g.connect(ctx.destination);o.frequency.value=880;g.gain.value=.06;o.start();
-    setTimeout(()=>{o.stop();ctx.close()},230);
+    const A=window.AudioContext||window.webkitAudioContext;
+    if(!A)return null;
+    if(!alertAudioContext || alertAudioContext.state==='closed'){
+      alertAudioContext=new A();
+    }
+    if(alertAudioContext.state==='suspended'){
+      alertAudioContext.resume().catch(()=>{});
+    }
+    return alertAudioContext;
+  }catch{
+    return null;
+  }
+}
+
+function scheduleAlertTone(ctx,note){
+  const start=ctx.currentTime+0.025+note.t;
+  const stop=start+note.d;
+  const osc=ctx.createOscillator();
+  const gain=ctx.createGain();
+
+  osc.type=note.type||'sine';
+  osc.frequency.setValueAtTime(note.f,start);
+
+  gain.gain.setValueAtTime(0.0001,start);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.001,note.v),start+0.018);
+  gain.gain.setValueAtTime(Math.max(0.001,note.v*0.82),Math.max(start+0.02,stop-0.06));
+  gain.gain.exponentialRampToValueAtTime(0.0001,stop);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(start);
+  osc.stop(stop+0.02);
+}
+
+function playAlertSound(name='crystal',force=false){
+  if(!force && !settings.sound)return;
+  const ctx=ensureAudioContext();
+  if(!ctx)return;
+
+  const pattern=ALERT_SOUND_PATTERNS[name]||ALERT_SOUND_PATTERNS.crystal;
+  try{
+    pattern.forEach(note=>scheduleAlertTone(ctx,note));
   }catch{}
+}
+
+function beep(){
+  playAlertSound(settings.alertSound||'crystal',false);
 }
 function flashTitle(text){
   clearInterval(titleTimer); let flip=false, base='HorizonXI Summoner Unlock Tracker';
@@ -812,7 +941,116 @@ function updateCountdowns(){
     else sc.textContent='scheduling…';
   }
   document.querySelectorAll('.forecastResetCountdown').forEach(x=>x.textContent=fmtDuration(v.toMidnight));
+  updateFutureCountdowns();
 }
+
+function futureDayStartMs(offset,nowMs=Date.now()){
+  const v=vanaState(nowMs);
+  return nowMs+v.toMidnight+Math.max(0,offset-1)*VANA_DAY_MS;
+}
+function futureDayName(offset,nowMs=Date.now()){
+  const v=vanaState(nowMs);
+  return VANA_DAYS[(((v.dayIndex+offset)%8)+8)%8];
+}
+function updateFutureCountdowns(){
+  const now=Date.now();
+  document.querySelectorAll('[data-future-day-offset]').forEach(el=>{
+    const offset=+el.dataset.futureDayOffset;
+    if(!Number.isFinite(offset))return;
+    el.textContent='starts in '+fmtDuration(Math.max(0,futureDayStartMs(offset,now)-now));
+  });
+}
+function renderFutureForecasts(forecasts){
+  const host=document.getElementById('futureForecastDays');
+  const status=document.getElementById('futureForecastStatus');
+  if(!host || !status)return;
+
+  host.innerHTML='';
+  const byDay=Object.fromEntries(Array.from({length:7},(_,i)=>[i+1,[]]));
+  let futureRowsSeen=0;
+
+  Object.entries(forecasts||{}).forEach(([zone,f])=>{
+    if(!f || f.error || !Array.isArray(f.future))return;
+    f.future.forEach(day=>{
+      const offset=+day.offset;
+      if(offset<1 || offset>7)return;
+      futureRowsSeen++;
+      const vals=[day.normal||'',day.common||'',day.rare||''];
+      COLORS.forEach(color=>{
+        if(state[color.id])return;
+        const hit=chanceFor(color,vals);
+        if(hit.chance<=0)return;
+        byDay[offset].push({
+          offset,
+          zone,
+          color,
+          chance:hit.chance,
+          hits:hit.hits,
+          vanaDay:day.vana_day||futureDayName(offset),
+          earthTime:day.earth_time||'',
+          vals
+        });
+      });
+    });
+  });
+
+  const colorOrder=Object.fromEntries(COLORS.map((c,i)=>[c.id,i]));
+
+  for(let offset=1;offset<=7;offset++){
+    let rows=byDay[offset];
+    const card=document.createElement('div');
+    card.className='future-day-card';
+
+    const wikiDay=rows.length && rows[0].vanaDay ? rows[0].vanaDay : futureDayName(offset);
+    card.innerHTML=`<div class="future-day-head">
+      <span class="future-day-title">Day +${offset} · ${wikiDay}</span>
+      <span class="future-day-countdown" data-future-day-offset="${offset}">starts in --:--:--</span>
+    </div><div class="future-day-body"></div>`;
+    const body=card.querySelector('.future-day-body');
+
+    if(!rows.length){
+      body.innerHTML='<div class="future-empty">No missing quest color forecast in tracked zones.</div>';
+      host.appendChild(card);
+      continue;
+    }
+
+    // Keep all eligible zones, but put best travel access first inside each color/day.
+    const ranking=bestAccessByColor(rows);
+    rows=[...rows].sort((a,b)=>{
+      const co=colorOrder[a.color.id]-colorOrder[b.color.id];
+      if(co!==0)return co;
+      const ab=isBestAccessRow(a,ranking), bb=isBestAccessRow(b,ranking);
+      if(ab!==bb)return ab?-1:1;
+      const at=zoneAccess(a.zone).tier, bt=zoneAccess(b.zone).tier;
+      if(at!==bt)return bt-at;
+      if(a.chance!==b.chance)return b.chance-a.chance;
+      return a.zone.localeCompare(b.zone);
+    });
+
+    rows.forEach(r=>{
+      const best=isBestAccessRow(r,ranking);
+      const row=document.createElement('div');
+      row.className='future-row';
+      row.innerHTML=`<div class="color-cell"><span class="color-label"><span class="swatch" style="background:${r.color.css}"></span><b>${r.color.name}</b></span></div>
+        <div class="future-zone"><b>${r.zone}</b>${accessHtml(r.zone,best)}</div>
+        <div class="future-chance">${r.chance}%</div>`;
+      body.appendChild(row);
+    });
+
+    host.appendChild(card);
+  }
+
+  if(!futureRowsSeen){
+    status.textContent='No future forecast rows were returned by the weather source.';
+  }else{
+    const total=Object.values(byDay).reduce((n,rows)=>n+rows.length,0);
+    status.textContent=total
+      ? `${total} upcoming quest-weather matches across the next 7 Vana'diel days. Completed colors are hidden.`
+      : 'No upcoming forecast matches for your remaining colors in the next 7 Vana’diel days.';
+  }
+  updateFutureCountdowns();
+}
+
 function renderAllForecasts(forecasts){
   const body=document.getElementById('allForecastBody');
   if(!body)return;
@@ -877,10 +1115,15 @@ async function scan(){
     const stamp=new Date().toLocaleString();
     status.textContent=`Last scan: ${stamp}. ${ok}/${zones.length} zones parsed${failed?`; ${failed} failed`:''}${payload.cached?' (Vana-day cache)':''}.`;
     filterLastOpportunities(true);
+    renderFutureForecasts(forecasts);
     renderAllForecasts(forecasts);
   }catch(e){
     status.textContent='SCAN ERROR: '+String(e.message||e);
     document.getElementById('allForecastBody').innerHTML=`<tr><td colspan="6" class="p15">${String(e.message||e)}</td></tr>`;
+    const futureStatus=document.getElementById('futureForecastStatus');
+    const futureHost=document.getElementById('futureForecastDays');
+    if(futureStatus)futureStatus.textContent='Future forecast unavailable because the scan failed.';
+    if(futureHost)futureHost.innerHTML='';
   }finally{
     btn.disabled=false;
     scheduleAuto();
@@ -923,7 +1166,7 @@ function filterLastOpportunities(doAlert=false){
   });
 
   body.querySelectorAll('button[data-mark]').forEach(b=>b.onclick=()=>{
-    state[b.dataset.mark]=true;save();renderCards();updateProgress();filterLastOpportunities();renderAllForecasts(window._lastForecasts||{});
+    state[b.dataset.mark]=true;save();renderCards();updateProgress();filterLastOpportunities();renderFutureForecasts(window._lastForecasts||{});renderAllForecasts(window._lastForecasts||{});
   });
 
   if(doAlert){

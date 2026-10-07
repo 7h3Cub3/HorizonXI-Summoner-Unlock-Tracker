@@ -112,34 +112,34 @@ Commit and push any source changes:
 
 ```bat
 git add .
-git commit -m "Release v15.0.0"
+git commit -m "Release v17.0.0"
 git push
 ```
 
 Create and push the version tag:
 
 ```bat
-git tag v15.0.0
-git push origin v15.0.0
+git tag v17.0.0
+git push origin v17.0.0
 ```
 
 Then create the Release and upload the EXE with GitHub CLI:
 
 ```bat
-gh release create v15.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v15.0.0" --generate-notes
+gh release create v17.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v17.0.0" --generate-notes
 ```
 
 To replace an EXE already attached to that Release:
 
 ```bat
-gh release upload v15.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
+gh release upload v17.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
 ```
 
 To inspect releases:
 
 ```bat
 gh release list
-gh release view v15.0.0
+gh release view v17.0.0
 ```
 
 ## Automatic GitHub build/release
@@ -156,10 +156,10 @@ Example:
 
 ```bat
 git add .
-git commit -m "Release v15.0.0"
+git commit -m "Release v17.0.0"
 git push
-git tag v15.0.0
-git push origin v15.0.0
+git tag v17.0.0
+git push origin v17.0.0
 ```
 
 With the workflow enabled, you do **not** need to run `gh release create` manually.
@@ -185,3 +185,43 @@ When running the one-file EXE, writable cache data is stored under:
 ```
 
 This avoids trying to write into PyInstaller's temporary one-file extraction directory.
+
+
+## v16 alert sounds
+
+The weather watcher now has five built-in notification sounds:
+
+- Crystal Chime
+- Beacon
+- Bell
+- Ascending
+- Urgent
+
+The sounds are synthesized with the browser Web Audio API, so there are no
+external audio files to package. The selected sound is saved in browser
+localStorage.
+
+Use **Test sound** to preview the currently selected sound. Testing works even
+when **Sound alert** is unchecked; actual forecast alerts still respect the
+Sound alert toggle.
+
+
+## v17 future weather forecast
+
+A separate **Next 7 Vana'diel Days** box is displayed below the current-day
+weather opportunities.
+
+It reads offsets +1 through +7 from the same per-zone Horizon weather forecast
+response used for today's scan. No additional zone requests are required.
+
+The future box:
+- hides colors already marked obtained
+- shows every eligible tracked zone
+- ranks the best travel access first when multiple zones can satisfy one color
+- shows the current forecast chance
+- groups opportunities by Vana day
+- continuously shows when each future Vana day starts in Earth time
+
+Seven Vana'diel days cover about 6 hours 43 minutes of real time.
+Future forecasts do not trigger notifications; alerts remain tied to current-day
+actionable weather.
