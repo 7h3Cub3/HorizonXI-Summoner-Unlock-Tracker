@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "17.0.0"
+VERSION = "18.0.0"
 APP_NAME = "HorizonXI_Summoner_Unlock_Tracker"
 
 # PyInstaller --onefile extracts bundled files to sys._MEIPASS.
@@ -420,7 +420,7 @@ def save_uploaded_map(data, filename, content_type):
     return map_status()
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "HorizonCarbuncleTracker/17"
+    server_version = "HorizonCarbuncleTracker/18"
 
     def log_message(self, fmt, *args):
         log_line("[HTTP] " + (fmt % args))
@@ -577,7 +577,7 @@ def main():
 
     url = f"http://127.0.0.1:{port}/"
     print()
-    print("HorizonXI Summoner Unlock Tracker v17")
+    print("HorizonXI Summoner Unlock Tracker v18")
     print("Browser URL:", url)
     print("Press Ctrl+C to stop.")
     print()

@@ -759,7 +759,7 @@ document.getElementById('resetBtn').onclick=()=>{
     renderAllForecasts(window._lastForecasts||{});
   }
 };
-if(!ALERT_SOUND_PATTERNS[settings.alertSound])settings.alertSound='crystal';
+if(!['crystal','beacon','bell','ascending','urgent'].includes(settings.alertSound))settings.alertSound='crystal';
 document.getElementById('soundToggle').checked=settings.sound;
 document.getElementById('alertSound').value=settings.alertSound||'crystal';
 document.getElementById('autoToggle').checked=settings.auto;
@@ -767,17 +767,22 @@ document.getElementById('threshold').value=String(settings.threshold);
 document.getElementById('soundToggle').onchange=e=>{
   settings.sound=e.target.checked;
   save();
-  if(settings.sound) ensureAudioContext();
+  if(settings.sound) void ensureAudioContext();
 };
 document.getElementById('alertSound').onchange=e=>{
   settings.alertSound=e.target.value;
   save();
 };
-document.getElementById('testSoundBtn').onclick=()=>{
-  playAlertSound(settings.alertSound||'crystal', true);
+document.getElementById('testSoundBtn').onclick=async()=>{
+  const ok=await playAlertSound(settings.alertSound||'crystal', true);
+  if(!ok){
+    alert('Audio could not be started. Check that this browser tab is not muted and that site audio is allowed.');
+  }
 };
 document.getElementById('autoToggle').onchange=e=>{settings.auto=e.target.checked;save();scheduleAuto()};
 document.getElementById('threshold').onchange=e=>{settings.threshold=+e.target.value;save();filterLastOpportunities()};
+
+window.__trackerScriptStarted=true;
 
 document.getElementById('notifyBtn').onclick=async()=>{
   if(!('Notification' in window)){ alert('This browser does not support desktop notifications. Page + sound alerts will still work.');return; }
@@ -823,7 +828,7 @@ const ALERT_SOUND_PATTERNS={
   ]
 };
 
-function ensureAudioContext(){
+async function ensureAudioContext(){
   try{
     const A=window.AudioContext||window.webkitAudioContext;
     if(!A)return null;
@@ -831,7 +836,7 @@ function ensureAudioContext(){
       alertAudioContext=new A();
     }
     if(alertAudioContext.state==='suspended'){
-      alertAudioContext.resume().catch(()=>{});
+      await alertAudioContext.resume();
     }
     return alertAudioContext;
   }catch{
@@ -859,19 +864,22 @@ function scheduleAlertTone(ctx,note){
   osc.stop(stop+0.02);
 }
 
-function playAlertSound(name='crystal',force=false){
-  if(!force && !settings.sound)return;
-  const ctx=ensureAudioContext();
-  if(!ctx)return;
+async function playAlertSound(name='crystal',force=false){
+  if(!force && !settings.sound)return false;
+  const ctx=await ensureAudioContext();
+  if(!ctx)return false;
 
   const pattern=ALERT_SOUND_PATTERNS[name]||ALERT_SOUND_PATTERNS.crystal;
   try{
     pattern.forEach(note=>scheduleAlertTone(ctx,note));
-  }catch{}
+    return true;
+  }catch{
+    return false;
+  }
 }
 
 function beep(){
-  playAlertSound(settings.alertSound||'crystal',false);
+  void playAlertSound(settings.alertSound||'crystal',false);
 }
 function flashTitle(text){
   clearInterval(titleTimer); let flip=false, base='HorizonXI Summoner Unlock Tracker';
@@ -1186,6 +1194,7 @@ function scheduleAuto(){
   updateCountdowns();
 }
 document.getElementById('scanBtn').onclick=scan;
+window.__trackerUiReady=true;
 
 
 

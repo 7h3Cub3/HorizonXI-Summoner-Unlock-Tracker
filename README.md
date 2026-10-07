@@ -112,34 +112,34 @@ Commit and push any source changes:
 
 ```bat
 git add .
-git commit -m "Release v17.0.0"
+git commit -m "Release v18.0.0"
 git push
 ```
 
 Create and push the version tag:
 
 ```bat
-git tag v17.0.0
-git push origin v17.0.0
+git tag v18.0.0
+git push origin v18.0.0
 ```
 
 Then create the Release and upload the EXE with GitHub CLI:
 
 ```bat
-gh release create v17.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v17.0.0" --generate-notes
+gh release create v18.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v18.0.0" --generate-notes
 ```
 
 To replace an EXE already attached to that Release:
 
 ```bat
-gh release upload v17.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
+gh release upload v18.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
 ```
 
 To inspect releases:
 
 ```bat
 gh release list
-gh release view v17.0.0
+gh release view v18.0.0
 ```
 
 ## Automatic GitHub build/release
@@ -156,10 +156,10 @@ Example:
 
 ```bat
 git add .
-git commit -m "Release v17.0.0"
+git commit -m "Release v18.0.0"
 git push
-git tag v17.0.0
-git push origin v17.0.0
+git tag v18.0.0
+git push origin v18.0.0
 ```
 
 With the workflow enabled, you do **not** need to run `gh release create` manually.
@@ -225,3 +225,23 @@ The future box:
 Seven Vana'diel days cover about 6 hours 43 minutes of real time.
 Future forecasts do not trigger notifications; alerts remain tied to current-day
 actionable weather.
+
+
+## v18 critical UI startup fix
+
+v17 had a JavaScript initialization-order bug. The page checked
+`ALERT_SOUND_PATTERNS` before the `const ALERT_SOUND_PATTERNS` declaration had
+been initialized. JavaScript throws a ReferenceError in that situation.
+
+Because the exception happened during initial page setup, later event handlers
+were never installed. This made several unrelated controls appear dead at once,
+including:
+- Scan Horizon forecasts
+- Enable browser notifications
+- Test sound
+
+v18 removes the early reference and validates the saved sound name without
+touching the later constant.
+
+Audio initialization is also more robust: the browser AudioContext is resumed
+and awaited before tones are scheduled.
