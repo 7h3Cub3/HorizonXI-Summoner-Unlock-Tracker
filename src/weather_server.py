@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "21.0.0"
+VERSION = "22.0.0"
 APP_NAME = "HorizonXI_Summoner_Unlock_Tracker"
 
 # PyInstaller --onefile extracts bundled files to sys._MEIPASS.
@@ -189,6 +189,72 @@ def source_url(zone_display):
     )
     return WEATHER_SPECIAL + "?" + query
 
+
+# The WeatherForecast HTML fetched by Python is not the browser-rendered page.
+# Its zone Earth Time text is UTC.  Convert to a time-zone-independent Unix
+# instant here; the browser will format it in the user's actual locale/DST.
+WIKI_MONTH_NUM = {name.lower(): i for i, name in enumerate(
+    ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1
+)}
+
+def wiki_utc_unix_ms(value, day_offset=0, now_utc=None):
+    s = clean(value)
+    if not s:
+        return None
+    if now_utc is None:
+        now_utc = dt.datetime.now(dt.timezone.utc)
+    elif now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=dt.timezone.utc)
+    else:
+        now_utc = now_utc.astimezone(dt.timezone.utc)
+
+    # If the source explicitly includes a timezone, honor it rather than
+    # interpreting the value as a second UTC adjustment.
+    if re.search(r"(?:Z|[+-]\d{2}:?\d{2})$", s, re.IGNORECASE):
+        try:
+            parsed = dt.datetime.fromisoformat(s.replace(" ", "T").replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                return int(parsed.timestamp() * 1000)
+        except ValueError:
+            return None
+
+    year = None
+    month = day = hour = minute = second = None
+    ap = None
+    m = re.fullmatch(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?",s,re.I)
+    if m:
+        year,month,day,hour,minute,sec,ap=m.groups()
+        year=int(year);month=int(month);day=int(day);hour=int(hour);minute=int(minute);second=int(sec or 0)
+    else:
+        m = re.fullmatch(r"(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ,]*(\d{4})?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?",s,re.I)
+        if not m: return None
+        day,mon,year,hour,minute,sec,ap=m.groups()
+        month=WIKI_MONTH_NUM.get(mon.lower())
+        if month is None:return None
+        day=int(day);year=int(year) if year else None
+        hour=int(hour);minute=int(minute);second=int(sec or 0)
+
+    if ap:
+        if not 1 <= hour <= 12:return None
+        hour=hour%12+(12 if ap.upper()=="PM" else 0)
+    elif not 0 <= hour <= 23:
+        return None
+
+    def candidate(y):
+        try:
+            return dt.datetime(y,month,day,hour,minute,second,tzinfo=dt.timezone.utc)
+        except (ValueError,TypeError):
+            return None
+
+    if year is not None:
+        result = candidate(year)
+    else:
+        target=now_utc+dt.timedelta(seconds=day_offset*VANA_DAY_SECONDS)
+        possibilities=[candidate(y) for y in (now_utc.year-1,now_utc.year,now_utc.year+1)]
+        possibilities=[d for d in possibilities if d is not None]
+        result=min(possibilities,key=lambda d:abs((d-target).total_seconds())) if possibilities else None
+    return int(result.timestamp()*1000) if result else None
+
 def parse_forecast_days(page, expected_zone_value, max_day=7):
     p = Rows()
     p.feed(page)
@@ -220,6 +286,7 @@ def parse_forecast_days(page, expected_zone_value, max_day=7):
             days[offset] = {
                 "offset": offset,
                 "earth_time": clean(r[2]),
+                "earth_unix_ms": wiki_utc_unix_ms(clean(r[2]), offset),
                 "vana_day": clean(r[3]),
                 "moon": clean(r[4]),
                 "normal": clean(r[5]),
@@ -273,6 +340,7 @@ def fetch_uncached(zone):
             "common": today["common"],
             "rare": today["rare"],
             "earth_time": today["earth_time"],
+            "earth_unix_ms": today["earth_unix_ms"],
             "vana_day": today["vana_day"],
             "moon": today["moon"],
             "future": future,
@@ -548,6 +616,13 @@ def self_test():
       <tr><td>Batallia_Downs</td><td>14</td><td>2026-10-07 02:26</td><td>Firesday</td><td>Full Moon</td><td>Clouds</td><td>Gales</td><td>Rain</td></tr>
     </table>
     """
+    sample_now = dt.datetime(2026, 10, 8, 15, 30, tzinfo=dt.timezone.utc)
+    assert wiki_utc_unix_ms("08-Oct 03:00 PM", 0, sample_now) == 1791471600000
+    assert wiki_utc_unix_ms("2026-10-08 15:00", 0, sample_now) == 1791471600000
+    assert wiki_utc_unix_ms("2026-10-08T15:00:00Z", 0, sample_now) == 1791471600000
+    assert wiki_utc_unix_ms("invalid", 0, sample_now) is None
+    assert wiki_utc_unix_ms("01-Jan 12:12 AM", 1,
+        dt.datetime(2026,12,31,23,tzinfo=dt.timezone.utc)) == 1798762320000
     n, c, r, row, diag = parse_today(sample, "Batallia_Downs")
     assert (n, c, r) == ("Clouds", "Dust Storm", "Rain")
     days, _ = parse_forecast_days(sample, "Batallia_Downs", max_day=7)
@@ -582,7 +657,7 @@ def main():
 
     url = f"http://127.0.0.1:{port}/"
     print()
-    print("HorizonXI Summoner Unlock Tracker v21")
+    print("HorizonXI Summoner Unlock Tracker v22")
     print("Browser URL:", url)
     print("Press Ctrl+C to stop.")
     print()

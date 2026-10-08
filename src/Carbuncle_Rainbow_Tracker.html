@@ -350,8 +350,8 @@
       <span class="pill">Next automatic scan: <b id="scanCountdown">--:--:--</b></span>
     </div>
     <div class="tiny" style="margin-top:7px">
-      One Vana'diel day is 57m 36s of Earth time. Future timestamps correspond to the
-      <b>same offset rows as the Horizon Wiki</b>, without guessing an extra Vana'diel day or timezone correction.
+      One Vana'diel day is 57m 36s of Earth time. The Wiki source's UTC forecast timestamps are
+      <b>automatically converted to your browser's timezone (including DST)</b>. No fixed-hour adjustment is used.
       A forecast day boundary is not the same as a change in live zone weather.
     </div>
     <div class="spacer"></div>
@@ -376,7 +376,7 @@
       <div class="row" style="justify-content:space-between;align-items:center">
         <div>
           <h3 style="margin:0 0 3px 0">Next 7 Vana'diel Days</h3>
-          <div class="meta">The first seven future start times from the Wiki, ordered by Earth time. Expired source rows are hidden; original Wiki day offsets are shown under each title.</div>
+          <div class="meta">The first seven future start times from the Wiki, ordered by Earth time. Expired source rows are hidden; original Wiki day offsets are shown under each title. Times are your local time.</div>
         </div>
         <span class="pill">Horizon: <b>~6h 43m IRL</b></span>
       </div>
@@ -946,17 +946,16 @@ function vanaState(nowMs=Date.now()){
 }
 
 /*
- * Wiki rows are indexed by their explicit offset (Today=0, Day +1=1, ...).
- * Each row's Earth Time belongs to that row: do NOT reconstruct it by
- * adding one Vana'diel day to Today or search for arbitrary timezone shifts.
- * The horizon site describes its times as browser-local; display the source
- * wall-clock string exactly, and parse it as local only for countdowns.
+ * Forecast Earth Time in the Wiki's downloaded HTML is UTC. The Wiki converts
+ * that value to the visitor's timezone in the page. Our Python helper doesn't
+ * execute the Wiki's browser JavaScript, so it supplies UTC Unix milliseconds.
+ * Prefer the absolute timestamp from the helper. The parsing fallback below
+ * also treats unzoned source strings as UTC, never as browser-local time.
  */
 const WIKI_MONTHS={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-function parseWikiEarthTimeLocal(value,nowMs=Date.now(),offset=0){
+function parseWikiEarthTimeUTC(value,nowMs=Date.now(),offset=0){
   const s=String(value||'').trim();
   if(!s)return NaN;
-  // ISO timestamps containing an explicit UTC offset remain absolute instants.
   if(/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)$/i.test(s)){
     const t=Date.parse(s.replace(' ','T'));
     return Number.isFinite(t)?t:NaN;
@@ -965,7 +964,6 @@ function parseWikiEarthTimeLocal(value,nowMs=Date.now(),offset=0){
   let m=s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
   if(m){year=+m[1];month=+m[2]-1;day=+m[3];hour=+m[4];minute=+m[5];second=+(m[6]||0);ampm=m[7]||null;}
   if(!m){
-    // Wiki's displayed format: "08-Oct 11:14 AM" (no year).
     m=s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ,]*(\d{4})?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
     if(m){
       day=+m[1];month=WIKI_MONTHS[m[2].toLowerCase()];year=m[3]?+m[3]:null;
@@ -977,12 +975,12 @@ function parseWikiEarthTimeLocal(value,nowMs=Date.now(),offset=0){
   if(ampm){if(hour<1||hour>12)return NaN;hour=(hour%12)+(ampm.toUpperCase()==='PM'?12:0);}
   else if(hour>23)return NaN;
   function candidate(y){
-    const d=new Date(y,month,day,hour,minute,second,0);
-    return d.getFullYear()===y&&d.getMonth()===month&&d.getDate()===day?d.getTime():NaN;
+    const ts=Date.UTC(y,month,day,hour,minute,second,0);
+    const d=new Date(ts);
+    return d.getUTCFullYear()===y&&d.getUTCMonth()===month&&d.getUTCDate()===day?ts:NaN;
   }
   if(year!==null)return candidate(year);
-  // Yearless Wiki dates can cross New Year; pick nearest plausible year.
-  const currentYear=new Date(nowMs).getFullYear();
+  const currentYear=new Date(nowMs).getUTCFullYear();
   let best=NaN,dist=Infinity;
   for(const y of [currentYear-1,currentYear,currentYear+1]){
     const ts=candidate(y);
@@ -991,10 +989,15 @@ function parseWikiEarthTimeLocal(value,nowMs=Date.now(),offset=0){
   }
   return best;
 }
+function localWikiEarthTime(ts){
+  if(!Number.isFinite(ts))return 'Time unavailable';
+  return new Date(ts).toLocaleString(undefined,{
+    day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',
+    timeZoneName:'short'
+  });
+}
 function setWikiForecastRowTimes(forecasts,nowMs=Date.now()){
   wikiDayTimes={};
-  // Prefer a stable, easily verifiable zone as reference; all zones share
-  // the same Wiki day offsets. Other zones are used as fallbacks.
   const entries=Object.entries(forecasts||{}).sort((a,b)=>{
     const ap=a[0]==='Buburimu Peninsula'?0:1;
     const bp=b[0]==='Buburimu Peninsula'?0:1;
@@ -1002,13 +1005,15 @@ function setWikiForecastRowTimes(forecasts,nowMs=Date.now()){
   });
   for(const [zone,f] of entries){
     if(!f||f.error)continue;
-    const rows=[{offset:0,earth_time:f.earth_time},...(Array.isArray(f.future)?f.future:[])];
+    const rows=[{offset:0,earth_time:f.earth_time,earth_unix_ms:f.earth_unix_ms},...(Array.isArray(f.future)?f.future:[])];
     for(const row of rows){
       const offset=+row.offset;
       if(!Number.isInteger(offset)||offset<0||offset>MAX_WIKI_FUTURE_OFFSET||wikiDayTimes[offset])continue;
       const raw=String(row.earth_time||'').trim();
-      if(!raw)continue;
-      const ts=parseWikiEarthTimeLocal(raw,nowMs,offset);
+      const supplied=row.earth_unix_ms;
+      const ts=(typeof supplied==='number'&&Number.isFinite(supplied))
+        ?supplied:parseWikiEarthTimeUTC(raw,nowMs,offset);
+      if(!Number.isFinite(ts))continue;
       wikiDayTimes[offset]={ts,raw,zone,offset};
     }
   }
@@ -1016,11 +1021,11 @@ function setWikiForecastRowTimes(forecasts,nowMs=Date.now()){
   const ref=document.getElementById('wikiTodayReference');
   if(ref){
     ref.textContent=today
-      ? `Wiki "Today" (offset 0): ${today.zone} — ${today.raw}. Day +1 is a different row, normally ~57m36s later.`
+      ? `Wiki "Today" (offset 0): ${today.zone} — ${localWikiEarthTime(today.ts)} (source UTC: ${today.raw}).`
       : 'Wiki "Today" timestamp was not returned by the weather helper.';
   }
   const valid=Object.values(wikiDayTimes).filter(x=>Number.isFinite(x.ts)).length;
-  wikiTimeCalibrationNote=`${valid} Wiki row timestamps parsed; source times displayed unchanged.`;
+  wikiTimeCalibrationNote=`${valid} Wiki row UTC timestamps parsed and converted to local time.`;
 }
 function nextWikiForecastRowMs(nowMs=Date.now()){
   const future=Object.values(wikiDayTimes).map(x=>x.ts)
@@ -1036,7 +1041,7 @@ function futureDayName(offset,nowMs=Date.now()){
 }
 function futureDayTimeLabel(offset){
   const row=wikiDayTimes[offset];
-  return row ? row.raw : 'Time unavailable';
+  return row ? localWikiEarthTime(row.ts) : 'Time unavailable';
 }
 // A Wiki offset is a source row ID, NOT a promise that its time is in the future.
 // Sort by the real Earth timestamp and keep only rows that have not begun yet.

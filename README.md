@@ -112,34 +112,34 @@ Commit and push any source changes:
 
 ```bat
 git add .
-git commit -m "Release v21.0.0"
+git commit -m "Release v22.0.0"
 git push
 ```
 
 Create and push the version tag:
 
 ```bat
-git tag v21.0.0
-git push origin v21.0.0
+git tag v22.0.0
+git push origin v22.0.0
 ```
 
 Then create the Release and upload the EXE with GitHub CLI:
 
 ```bat
-gh release create v21.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v21.0.0" --generate-notes
+gh release create v22.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v22.0.0" --generate-notes
 ```
 
 To replace an EXE already attached to that Release:
 
 ```bat
-gh release upload v21.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
+gh release upload v22.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
 ```
 
 To inspect releases:
 
 ```bat
 gh release list
-gh release view v21.0.0
+gh release view v22.0.0
 ```
 
 ## Automatic GitHub build/release
@@ -156,10 +156,10 @@ Example:
 
 ```bat
 git add .
-git commit -m "Release v21.0.0"
+git commit -m "Release v22.0.0"
 git push
-git tag v21.0.0
-git push origin v21.0.0
+git tag v22.0.0
+git push origin v22.0.0
 ```
 
 With the workflow enabled, you do **not** need to run `gh release create` manually.
@@ -301,3 +301,20 @@ raw times will need to be checked.
 - The future cards update automatically when a timestamp passes, even if automatic network rescanning is off.
 - Wiki times are shown unchanged, with no guessed timezone correction.
 - If fewer than seven future rows are available from the source, shows only the available rows and explains why.
+
+
+## v22: UTC -> browser timezone fix
+
+The standalone Python helper downloads the Wiki's raw weather forecast HTML,
+which does not execute the Wiki's client-side local-time conversion. The
+`Earth Time` field from that HTML is interpreted as UTC, not as browser-local
+time. Python returns `earth_unix_ms` for each offset 0..14 (and preserves the
+original `earth_time` UTC text). The browser formats the timestamp in the
+visitor's timezone with automatic daylight-saving handling. The Today reference
+now shows both the converted local time and raw UTC value. Countdowns, future
+row expiration, and automatic scan scheduling use the identical UTC timestamp.
+
+**No fixed CET/CEST or numeric +/- hour patch is applied.**
+
+GitHub Actions runs the Python UTC time regression tests and Node browser time
+tests before building the EXE.

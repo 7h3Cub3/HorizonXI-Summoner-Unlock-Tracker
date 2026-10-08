@@ -1,10 +1,8 @@
 @echo off
-echo Example manual release sequence:
-echo.
-echo   build_exe.bat
-echo   git add .
-echo   git commit -m "Release v21.0.0"
-echo   git push
-echo   git tag v21.0.0
-echo   git push origin v21.0.0
-echo   gh release create v21.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v21.0.0" --generate-notes
+echo 1. git add .
+echo 2. git commit -m "Release v22.0.0"
+echo 3. git push origin main
+echo 4. git tag -a v22.0.0 -m "UTC weather timestamp fix"
+echo 5. git push origin v22.0.0
+echo 6. gh run watch
+echo 7. gh release view v22.0.0 --web
