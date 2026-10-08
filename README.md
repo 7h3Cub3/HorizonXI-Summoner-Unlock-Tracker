@@ -112,34 +112,34 @@ Commit and push any source changes:
 
 ```bat
 git add .
-git commit -m "Release v22.0.0"
+git commit -m "Release v24.0.0"
 git push
 ```
 
 Create and push the version tag:
 
 ```bat
-git tag v22.0.0
-git push origin v22.0.0
+git tag v24.0.0
+git push origin v24.0.0
 ```
 
 Then create the Release and upload the EXE with GitHub CLI:
 
 ```bat
-gh release create v22.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v22.0.0" --generate-notes
+gh release create v24.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v24.0.0" --generate-notes
 ```
 
 To replace an EXE already attached to that Release:
 
 ```bat
-gh release upload v22.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
+gh release upload v24.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
 ```
 
 To inspect releases:
 
 ```bat
 gh release list
-gh release view v22.0.0
+gh release view v24.0.0
 ```
 
 ## Automatic GitHub build/release
@@ -156,10 +156,10 @@ Example:
 
 ```bat
 git add .
-git commit -m "Release v22.0.0"
+git commit -m "Release v24.0.0"
 git push
-git tag v22.0.0
-git push origin v22.0.0
+git tag v24.0.0
+git push origin v24.0.0
 ```
 
 With the workflow enabled, you do **not** need to run `gh release create` manually.
@@ -208,7 +208,7 @@ Sound alert toggle.
 
 ## v17 future weather forecast
 
-A separate **Next 7 Vana'diel Days** box is displayed below the current-day
+A separate **Next 7/14/21/28 Vana'diel Days** box is displayed below the current-day
 weather opportunities.
 
 It reads offsets +1 through +7 from the same per-zone Horizon weather forecast
@@ -318,3 +318,40 @@ row expiration, and automatic scan scheduling use the identical UTC timestamp.
 
 GitHub Actions runs the Python UTC time regression tests and Node browser time
 tests before building the EXE.
+
+
+## v23 future forecast range selector
+
+The future forecast box offers **7, 14, 21, or 28 upcoming Vana'diel days**
+(default 7). The selected range is saved in browser localStorage and changing
+it re-renders the most recently fetched forecast without making new requests.
+The displayed IRL span is computed using 57m36s per Vana day.
+
+The local Python parser accepts source offsets up to **+36**, allowing space
+for expired day rows even with a 28-day selection. The extension can return
+fewer rows than requested; the tracker shows the actual number available and
+never extrapolates weather beyond what the Wiki returned. This is particularly
+relevant for 21- or 28-day selections, since public Wiki examples commonly
+include forecasts only through +15.
+
+Weather time conversion and automatic rescan logic are unchanged from v22.
+
+
+## v24 — selectable display timezone and timing diagnostics
+
+The forecast displays exact UTC instants formatted in the selected IANA timezone.
+A new **Display timezone** dropdown offers Browser (automatic), Europe/Madrid,
+other common zones, and a custom IANA timezone identifier. In particular,
+Europe/Madrid provides CEST (+02:00) or CET (+01:00) as appropriate for the
+forecast date; do not manually add an offset to the Unix timestamp.
+
+The reference below the future forecast reports the browser's actual timezone,
+the selected display timezone, the raw Wiki Earth Time, the UTC timestamp,
+and the displayed local time. This makes it possible to diagnose a browser
+configured to UTC when the expected display is UTC+2. The display selector is
+saved in localStorage.
+
+Timezone selection never modifies timestamp arithmetic or forecast-day
+ordering. Countdown durations and expiration filtering always use absolute
+Unix epoch timestamps. If the Wiki source itself is inconsistent, the
+diagnostics will expose that; do not compensate by silently shifting forecasts.

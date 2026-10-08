@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "22.0.0"
+VERSION = "24.0.0"
 APP_NAME = "HorizonXI_Summoner_Unlock_Tracker"
 
 # PyInstaller --onefile extracts bundled files to sys._MEIPASS.
@@ -332,9 +332,9 @@ def fetch_uncached(zone):
     try:
         data, meta = fetch(url, referer=DIGGING_SPECIAL)
         page, _encoding = decode(data, meta.get("content_type", ""))
-        days, _diag = parse_forecast_days(page, qzone, max_day=14)
+        days, _diag = parse_forecast_days(page, qzone, max_day=36)
         today = days[0]
-        future = [days[i] for i in range(1, 15) if i in days]
+        future = [days[i] for i in range(1, 37) if i in days]
         return {
             "normal": today["normal"],
             "common": today["common"],
@@ -614,6 +614,8 @@ def self_test():
       <tr><td>Batallia_Downs</td><td>1</td><td>2026-10-06 13:57</td><td>Windsday</td><td>Full Moon</td><td>Gales</td><td>Clouds</td><td>Rain</td></tr>
       <tr><td>Batallia_Downs</td><td>7</td><td>2026-10-06 19:43</td><td>Firesday</td><td>Full Moon</td><td>Heat Waves</td><td>Clouds</td><td>Rain</td></tr>
       <tr><td>Batallia_Downs</td><td>14</td><td>2026-10-07 02:26</td><td>Firesday</td><td>Full Moon</td><td>Clouds</td><td>Gales</td><td>Rain</td></tr>
+      <tr><td>Batallia_Downs</td><td>28</td><td>2026-10-07 15:53</td><td>Firesday</td><td>Full Moon</td><td>Thunder</td><td>Clouds</td><td>Rain</td></tr>
+      <tr><td>Batallia_Downs</td><td>36</td><td>2026-10-07 23:34</td><td>Firesday</td><td>Full Moon</td><td>Thunder</td><td>Clouds</td><td>Rain</td></tr>
     </table>
     """
     sample_now = dt.datetime(2026, 10, 8, 15, 30, tzinfo=dt.timezone.utc)
@@ -630,6 +632,9 @@ def self_test():
     assert days[7]["normal"] == "Heat Waves"
     further, _ = parse_forecast_days(sample, "Batallia_Downs", max_day=14)
     assert further[14]["common"] == "Gales"
+    long_range, _ = parse_forecast_days(sample, "Batallia_Downs", max_day=36)
+    assert long_range[28]["normal"] == "Thunder"
+    assert long_range[36]["normal"] == "Thunder"
     assert source_url("Batallia Downs").endswith(
         "weatherTypeDropDown=8&zoneNameDropDown=Batallia_Downs"
     )
@@ -640,7 +645,7 @@ def self_test():
 def main():
     self_test()
     log_line(f"[START] HorizonXI Carbuncle Rainbow Tracker v{VERSION}")
-    log_line("[PARSER] weatherTypeDropDown=8; forecast offsets 0..7; weather columns=5,6,7 zero-based")
+    log_line("[PARSER] weatherTypeDropDown=8; forecast offsets 0..36; weather columns=5,6,7 zero-based")
 
     server = None
     port = None
@@ -657,7 +662,7 @@ def main():
 
     url = f"http://127.0.0.1:{port}/"
     print()
-    print("HorizonXI Summoner Unlock Tracker v22")
+    print("HorizonXI Summoner Unlock Tracker v24")
     print("Browser URL:", url)
     print("Press Ctrl+C to stop.")
     print()

@@ -375,14 +375,39 @@
     <div class="card" style="padding:12px">
       <div class="row" style="justify-content:space-between;align-items:center">
         <div>
-          <h3 style="margin:0 0 3px 0">Next 7 Vana'diel Days</h3>
-          <div class="meta">The first seven future start times from the Wiki, ordered by Earth time. Expired source rows are hidden; original Wiki day offsets are shown under each title. Times are your local time.</div>
+          <h3 id="futureForecastTitle" style="margin:0 0 3px 0">Next 7 Vana'diel Days</h3>
+          <div class="meta">Upcoming Wiki forecast rows in your selected display timezone. Expired rows are hidden and countdowns use absolute UTC timestamps (not display-clock values).</div>
         </div>
-        <span class="pill">Horizon: <b>~6h 43m IRL</b></span>
+        <div class="row" style="align-items:center;gap:10px">
+          <label for="futureDaysSelect">Future days:</label>
+          <select id="futureDaysSelect" aria-label="Number of future Vana'diel days">
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="21">21 days</option>
+            <option value="28">28 days</option>
+          </select>
+          <label for="displayTimeZoneSelect">Display timezone:</label>
+          <select id="displayTimeZoneSelect" aria-label="Forecast display timezone">
+            <option value="auto">Browser (automatic)</option>
+            <option value="Europe/Madrid">Europe/Madrid (CET/CEST)</option>
+            <option value="Europe/Paris">Europe/Paris</option>
+            <option value="Europe/Berlin">Europe/Berlin</option>
+            <option value="Europe/London">Europe/London</option>
+            <option value="UTC">UTC</option>
+            <option value="America/New_York">New York</option>
+            <option value="America/Chicago">Chicago</option>
+            <option value="America/Los_Angeles">Los Angeles</option>
+            <option value="Asia/Tokyo">Tokyo</option>
+            <option value="custom">Other (IANA timezone)</option>
+          </select>
+          <input id="customTimeZoneInput" type="text" style="display:none;max-width:170px" placeholder="e.g. Asia/Kolkata" aria-label="Custom IANA timezone">
+          <span class="pill" id="futureForecastCoverage">~6h 43m IRL</span>
+        </div>
       </div>
       <div class="spacer"></div>
       <div id="futureForecastStatus" class="tiny muted">Run a forecast scan.</div>
       <div id="wikiTodayReference" class="note" style="margin-top:9px;margin-bottom:8px">Wiki Today row: waiting for scan.</div>
+      <div id="wikiTimezoneStatus" class="tiny muted" style="margin-bottom:10px">Browser timezone: detecting…</div>
       <div class="spacer"></div>
       <div id="futureForecastDays" class="future-forecast-days"></div>
     </div>
@@ -633,14 +658,21 @@ const LS_KEY='hxi-carbuncle-rainbow-v2';
 const SETTINGS_KEY='hxi-carbuncle-rainbow-settings-v2';
 const ALERT_KEY='hxi-carbuncle-rainbow-alerted-v2';
 let state = JSON.parse(localStorage.getItem(LS_KEY)||'{}');
-let settings = Object.assign({sound:false,auto:true,threshold:50,alertSound:'crystal'}, JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));
+let settings = Object.assign({sound:false,auto:true,threshold:50,alertSound:'crystal',futureDays:7,displayTimeZone:'auto',customTimeZone:''}, JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));
 let alertMemory = JSON.parse(localStorage.getItem(ALERT_KEY)||'{}');
 let autoTimer=null, titleTimer=null, clockTimer=null, nextScanAt=null;
 let wikiDayTimes={};
 let wikiTimeCalibrationNote='';
 let futureDisplayNextBoundaryMs=null;
-const MAX_WIKI_FUTURE_OFFSET=14;
+// Request some additional Wiki rows so expired offsets do not eat into the selected horizon.
+// The real limit is whichever future rows Horizon actually exposes.
+const MAX_WIKI_FUTURE_OFFSET=36;
+const FUTURE_DAY_CHOICES=[7,14,21,28];
 const VISIBLE_UPCOMING_DAYS=7;
+function selectedFutureDays(){
+  const n=Number(settings.futureDays);
+  return FUTURE_DAY_CHOICES.includes(n)?n:VISIBLE_UPCOMING_DAYS;
+}
 
 const VANA_DAY_MS = 57*60*1000 + 36*1000; // 57m 36s Earth time
 const VANA_EPOCH_MS = Date.UTC(2001,11,31,15,0,0); // 2002-01-01 00:00 JST
@@ -789,6 +821,30 @@ document.getElementById('testSoundBtn').onclick=async()=>{
 };
 document.getElementById('autoToggle').onchange=e=>{settings.auto=e.target.checked;save();scheduleAuto()};
 document.getElementById('threshold').onchange=e=>{settings.threshold=+e.target.value;save();filterLastOpportunities()};
+function updateFutureForecastControls(){
+  const days=selectedFutureDays();
+  document.getElementById('futureDaysSelect').value=String(days);
+  document.getElementById('futureForecastTitle').textContent=`Next ${days} Vana'diel Days`;
+  document.getElementById('futureForecastCoverage').textContent=`Up to ${fmtDuration(days*VANA_DAY_MS)} IRL`;
+}
+document.getElementById('futureDaysSelect').onchange=e=>{
+  settings.futureDays=+e.target.value;
+  if(!FUTURE_DAY_CHOICES.includes(settings.futureDays))settings.futureDays=7;
+  save();
+  updateFutureForecastControls();
+  if(window._lastForecasts)renderFutureForecasts(window._lastForecasts);
+};
+
+document.getElementById('displayTimeZoneSelect').onchange=e=>{
+  settings.displayTimeZone=e.target.value;
+  save();
+  refreshDisplayTimeZone();
+};
+document.getElementById('customTimeZoneInput').onchange=e=>{
+  settings.customTimeZone=e.target.value.trim();
+  save();
+  refreshDisplayTimeZone();
+};
 
 window.__trackerScriptStarted=true;
 
@@ -989,12 +1045,63 @@ function parseWikiEarthTimeUTC(value,nowMs=Date.now(),offset=0){
   }
   return best;
 }
+// Forecast timestamps are absolute UTC instants. Timezone selection affects
+// formatting only, never the stored epoch, ordering, or countdown values.
+function browserTimeZone(){
+  try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'Unknown';}
+  catch{return 'Unknown';}
+}
+function selectedDisplayTimeZone(){
+  const choice=String(settings.displayTimeZone||'auto');
+  if(choice==='auto')return undefined; // Browser's own configured timezone.
+  const tz=choice==='custom'?String(settings.customTimeZone||'').trim():choice;
+  if(!tz)return undefined;
+  try{new Intl.DateTimeFormat('en',{timeZone:tz});return tz;}
+  catch{return undefined;}
+}
+function displayZoneName(){
+  return selectedDisplayTimeZone()||browserTimeZone();
+}
 function localWikiEarthTime(ts){
   if(!Number.isFinite(ts))return 'Time unavailable';
-  return new Date(ts).toLocaleString(undefined,{
+  const fmt={day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZoneName:'short'};
+  const zone=selectedDisplayTimeZone();
+  if(zone)fmt.timeZone=zone;
+  return new Intl.DateTimeFormat(undefined,fmt).format(new Date(ts));
+}
+function formatUtcWikiInstant(ts){
+  if(!Number.isFinite(ts))return 'Time unavailable';
+  return new Intl.DateTimeFormat('en-GB',{
     day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',
-    timeZoneName:'short'
-  });
+    hourCycle:'h23',timeZone:'UTC'
+  }).format(new Date(ts))+' UTC';
+}
+function renderWikiTodayReference(){
+  const today=wikiDayTimes[0];
+  const ref=document.getElementById('wikiTodayReference');
+  if(ref){
+    ref.textContent=today
+      ? `Wiki Today (offset 0): ${today.zone} — source ${today.raw} → parsed ${formatUtcWikiInstant(today.ts)} → display ${localWikiEarthTime(today.ts)}.`
+      : 'Wiki Today timestamp was not returned by the weather helper.';
+  }
+  const status=document.getElementById('wikiTimezoneStatus');
+  if(status){
+    const raw=String(settings.displayTimeZone||'auto');
+    const custom=raw==='custom'&&settings.customTimeZone&&!selectedDisplayTimeZone();
+    status.textContent=`Browser zone: ${browserTimeZone()} | Display zone: ${displayZoneName()} | Current time there: ${localWikiEarthTime(Date.now())}`
+      +(custom?' | Custom timezone invalid; using browser timezone.':'');
+  }
+}
+function refreshDisplayTimeZone(){
+  const select=document.getElementById('displayTimeZoneSelect');
+  const input=document.getElementById('customTimeZoneInput');
+  const choices=Array.from(select.options).map(o=>o.value);
+  if(!choices.includes(settings.displayTimeZone))settings.displayTimeZone='auto';
+  select.value=settings.displayTimeZone;
+  input.style.display=settings.displayTimeZone==='custom'?'':'none';
+  input.value=String(settings.customTimeZone||'');
+  renderWikiTodayReference();
+  if(window._lastForecasts)renderFutureForecasts(window._lastForecasts);
 }
 function setWikiForecastRowTimes(forecasts,nowMs=Date.now()){
   wikiDayTimes={};
@@ -1017,13 +1124,7 @@ function setWikiForecastRowTimes(forecasts,nowMs=Date.now()){
       wikiDayTimes[offset]={ts,raw,zone,offset};
     }
   }
-  const today=wikiDayTimes[0];
-  const ref=document.getElementById('wikiTodayReference');
-  if(ref){
-    ref.textContent=today
-      ? `Wiki "Today" (offset 0): ${today.zone} — ${localWikiEarthTime(today.ts)} (source UTC: ${today.raw}).`
-      : 'Wiki "Today" timestamp was not returned by the weather helper.';
-  }
+  renderWikiTodayReference();
   const valid=Object.values(wikiDayTimes).filter(x=>Number.isFinite(x.ts)).length;
   wikiTimeCalibrationNote=`${valid} Wiki row UTC timestamps parsed and converted to local time.`;
 }
@@ -1045,7 +1146,7 @@ function futureDayTimeLabel(offset){
 }
 // A Wiki offset is a source row ID, NOT a promise that its time is in the future.
 // Sort by the real Earth timestamp and keep only rows that have not begun yet.
-function getUpcomingWikiRows(nowMs=Date.now(),limit=VISIBLE_UPCOMING_DAYS){
+function getUpcomingWikiRows(nowMs=Date.now(),limit=selectedFutureDays()){
   return Object.values(wikiDayTimes)
     .filter(row=>row && Number.isFinite(row.ts) && row.ts>nowMs)
     .sort((a,b)=>a.ts-b.ts || a.offset-b.offset)
@@ -1088,6 +1189,7 @@ function updateCountdowns(){
   document.querySelectorAll('.forecastResetCountdown').forEach(x=>{
     x.textContent=Number.isFinite(next)?fmtDuration(next-now):'--:--:--';
   });
+  renderWikiTodayReference();
   updateFutureCountdowns();
 }
 
@@ -1098,8 +1200,9 @@ function renderFutureForecasts(forecasts){
 
   host.innerHTML='';
   futureDisplayNextBoundaryMs=null;
+  const requestedDays=selectedFutureDays();
   const now=Date.now();
-  const upcoming=getUpcomingWikiRows(now,VISIBLE_UPCOMING_DAYS);
+  const upcoming=getUpcomingWikiRows(now,requestedDays);
   // These Wiki offsets have already begun, so they must not be presented as
   // *future* weather days even if their source labels are +1, +2, etc.
   const pastOffsets=Object.values(wikiDayTimes).filter(row=>
@@ -1178,7 +1281,7 @@ function renderFutureForecasts(forecasts){
   futureDisplayNextBoundaryMs=upcoming[0].ts;
   const total=Array.from(byDay.values()).reduce((n,rows)=>n+rows.length,0);
   const details=[];
-  details.push(`${upcoming.length} upcoming Vana'diel days displayed${upcoming.length<VISIBLE_UPCOMING_DAYS?' (fewer rows available from Wiki)':''}.`);
+  details.push(`${upcoming.length} of ${requestedDays} requested upcoming Vana'diel days displayed${upcoming.length<requestedDays?' (Wiki provided fewer future rows; missing days are not estimated)':''}.`);
   if(pastOffsets)details.push(`${pastOffsets} expired source row${pastOffsets===1?'':'s'} hidden.`);
   details.push(`${total} quest-weather matches for colors still needed.`);
   status.textContent=details.join(' ');
@@ -1388,6 +1491,8 @@ document.getElementById('mapUploadInput').onchange=async e=>{
 
 renderCards();
 updateProgress();
+updateFutureForecastControls();
+refreshDisplayTimeZone();
 scheduleAuto();
 updateCountdowns();
 clockTimer=setInterval(updateCountdowns,1000);

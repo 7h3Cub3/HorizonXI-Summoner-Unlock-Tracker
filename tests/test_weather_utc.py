@@ -22,6 +22,15 @@ class WeatherUtcTests(unittest.TestCase):
         html='<table><tr><td>Buburimu_Peninsula</td><td>0</td><td>08-Oct 03:00 PM</td><td>Firesday</td><td>Moon</td><td>Clouds</td><td>Thunder</td><td>Thunderstorms</td></tr><tr><td>Buburimu_Peninsula</td><td>1</td><td>08-Oct 03:57 PM</td><td>Earthsday</td><td>Moon</td><td>Clouds</td><td>Thunder</td><td>Thunderstorms</td></tr></table>'
         rows,_=m.parse_forecast_days(html,'Buburimu_Peninsula')
         self.assertEqual(rows[1]['earth_unix_ms']-rows[0]['earth_unix_ms'],57*60000)
+    def test_long_forecast_offset_is_preserved(self):
+        html='<table>'+''.join(
+          f'<tr><td>Buburimu_Peninsula</td><td>{i}</td><td>2026-10-08 15:00</td><td>Firesday</td><td>Moon</td><td>Clouds</td><td>Thunder</td><td>Thunderstorms</td></tr>'
+          for i in (0,7,14,21,28,36)
+        )+'</table>'
+        days,_=m.parse_forecast_days(html,'Buburimu_Peninsula',max_day=36)
+        self.assertEqual(sorted(days),[0,7,14,21,28,36])
+        limited,_=m.parse_forecast_days(html,'Buburimu_Peninsula',max_day=14)
+        self.assertEqual(sorted(limited),[0,7,14])
 
 if __name__=='__main__':
     unittest.main()

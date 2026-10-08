@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(22, 0, 0, 0),
-    prodvers=(22, 0, 0, 0),
+    filevers=(24, 0, 0, 0),
+    prodvers=(24, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,11 +17,11 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'Community project'),
           StringStruct('FileDescription', 'HorizonXI Summoner Unlock Tracker'),
-          StringStruct('FileVersion', '22.0.0'),
+          StringStruct('FileVersion', '24.0.0'),
           StringStruct('InternalName', 'HorizonXI_Summoner_Unlock_Tracker'),
           StringStruct('OriginalFilename', 'HorizonXI_Summoner_Unlock_Tracker.exe'),
           StringStruct('ProductName', 'HorizonXI Summoner Unlock Tracker'),
-          StringStruct('ProductVersion', '22.0.0')
+          StringStruct('ProductVersion', '24.0.0')
         ]
       )
     ]),
