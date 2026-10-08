@@ -112,34 +112,34 @@ Commit and push any source changes:
 
 ```bat
 git add .
-git commit -m "Release v18.0.0"
+git commit -m "Release v21.0.0"
 git push
 ```
 
 Create and push the version tag:
 
 ```bat
-git tag v18.0.0
-git push origin v18.0.0
+git tag v21.0.0
+git push origin v21.0.0
 ```
 
 Then create the Release and upload the EXE with GitHub CLI:
 
 ```bat
-gh release create v18.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v18.0.0" --generate-notes
+gh release create v21.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --title "v21.0.0" --generate-notes
 ```
 
 To replace an EXE already attached to that Release:
 
 ```bat
-gh release upload v18.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
+gh release upload v21.0.0 "dist\HorizonXI_Summoner_Unlock_Tracker.exe" --clobber
 ```
 
 To inspect releases:
 
 ```bat
 gh release list
-gh release view v18.0.0
+gh release view v21.0.0
 ```
 
 ## Automatic GitHub build/release
@@ -156,10 +156,10 @@ Example:
 
 ```bat
 git add .
-git commit -m "Release v18.0.0"
+git commit -m "Release v21.0.0"
 git push
-git tag v18.0.0
-git push origin v18.0.0
+git tag v21.0.0
+git push origin v21.0.0
 ```
 
 With the workflow enabled, you do **not** need to run `gh release create` manually.
@@ -245,3 +245,59 @@ touching the later constant.
 
 Audio initialization is also more robust: the browser AudioContext is resumed
 and awaited before tones are scheduled.
+
+
+## v19 Wiki-anchored weather timing
+
+Weather timing no longer relies on an independently reconstructed Vana'diel
+midnight for forecast scheduling.
+
+After each scan, v19 reads the Horizon Wiki **Today** row's `Earth Time` and
+uses it as the timing anchor. The future Day +1 through Day +7 start times,
+Today's forecast rollover countdown, and automatic rescan time are derived from
+that same anchor.
+
+The local helper can receive the Wiki's wall-clock text in a server/anonymous
+timezone rather than the browser timezone. To avoid hard-coding any timezone or
+DST rule, the browser tests nearby whole-hour interpretations of the Today
+timestamp and selects the one that puts the Today start inside the current
+57m36s Vana'diel-day window.
+
+This makes the schedule DST-safe and user-timezone-neutral. If the Wiki Earth
+Time cannot be parsed or reconciled, the tracker explicitly falls back to the
+standard Vana epoch calculation.
+
+Future cards now also display their local Earth start time next to the
+countdown.
+
+
+## v20: Align timeline rows with the Horizon Wiki
+
+A previous attempt reconstructed the future forecast times by adding 57m36s
+to the Today row, and tried arbitrary whole-hour timezone shifts. This made
+the displayed time difficult to compare with the Wiki's individual rows.
+
+Now each future day shows **that precise Wiki row's Earth Time**. The next-7
+days box includes a visible Wiki Today (offset 0) reference, using Buburimu
+Peninsula when available. Day +1 means the Wiki offset-1 row, not Today.
+The browser parses the Wiki's `08-Oct 11:14 AM` format as local time, supports
+year-end rollover, and uses that same row for the countdown. If an Earth
+Time cannot be parsed, the raw Wiki text is still shown and the countdown
+is marked unavailable rather than inventing a time. No guessed timezone or
+Vana-day shift is applied. The auto-rescan follows the next upcoming forecast
+row; if timing data is unavailable it retries after three minutes.
+
+The Wiki may change how it renders time in future; if the anonymous helper
+receives a different wall-clock timezone than the browser-facing website, the
+raw times will need to be checked.
+
+
+## v21: future-only weather forecasts
+
+- Reads source day offsets 0–14 when the Wiki provides them; no extra HTTP requests.
+- Separates original Wiki offsets from relative upcoming order.
+- Displays the next **seven actual future timestamps** instead of always showing Wiki offsets +1 through +7.
+- Past timestamps never appear as upcoming opportunities.
+- The future cards update automatically when a timestamp passes, even if automatic network rescanning is off.
+- Wiki times are shown unchanged, with no guessed timezone correction.
+- If fewer than seven future rows are available from the source, shows only the available rows and explains why.

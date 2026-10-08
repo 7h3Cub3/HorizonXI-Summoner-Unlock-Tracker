@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "18.0.0"
+VERSION = "21.0.0"
 APP_NAME = "HorizonXI_Summoner_Unlock_Tracker"
 
 # PyInstaller --onefile extracts bundled files to sys._MEIPASS.
@@ -265,9 +265,9 @@ def fetch_uncached(zone):
     try:
         data, meta = fetch(url, referer=DIGGING_SPECIAL)
         page, _encoding = decode(data, meta.get("content_type", ""))
-        days, _diag = parse_forecast_days(page, qzone, max_day=7)
+        days, _diag = parse_forecast_days(page, qzone, max_day=14)
         today = days[0]
-        future = [days[i] for i in range(1, 8) if i in days]
+        future = [days[i] for i in range(1, 15) if i in days]
         return {
             "normal": today["normal"],
             "common": today["common"],
@@ -280,11 +280,11 @@ def fetch_uncached(zone):
     except Exception as exc:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
-def fetch_zone(zone):
+def fetch_zone(zone, force=False):
     day = vana_day()
     with LOCK:
         entry = CACHE.get(zone)
-        if entry and entry["day"] == day:
+        if not force and entry and entry["day"] == day:
             result = dict(entry["result"])
             result["cache_hit"] = True
             return result, True
@@ -295,11 +295,11 @@ def fetch_zone(zone):
             CACHE[zone] = {"day": day, "result": dict(result)}
     return result, False
 
-def fetch_all():
+def fetch_all(force=False):
     out = {}
     all_cached = True
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {pool.submit(fetch_zone, z): z for z in ZONES}
+        futures = {pool.submit(fetch_zone, z, force): z for z in ZONES}
         for future in concurrent.futures.as_completed(futures):
             zone = futures[future]
             try:
@@ -420,7 +420,7 @@ def save_uploaded_map(data, filename, content_type):
     return map_status()
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "HorizonCarbuncleTracker/18"
+    server_version = "HorizonCarbuncleTracker/20"
 
     def log_message(self, fmt, *args):
         log_line("[HTTP] " + (fmt % args))
@@ -494,7 +494,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/forecasts":
             try:
-                forecasts, cached = fetch_all()
+                # A browser scan must not reuse forecasts cached before a Wiki row rollover.
+                force = (urllib.parse.parse_qs(u.query).get("fresh") or ["0"])[0] == "1"
+                forecasts, cached = fetch_all(force=force)
                 return self.sendj(200, {
                     "ok": True,
                     "tracker_version": VERSION,
@@ -543,6 +545,7 @@ def self_test():
       <tr><td>Batallia_Downs</td><td>0</td><td>2026-10-06 13:00</td><td>Watersday</td><td>Full Moon</td><td>Clouds</td><td>Dust Storm</td><td>Rain</td></tr>
       <tr><td>Batallia_Downs</td><td>1</td><td>2026-10-06 13:57</td><td>Windsday</td><td>Full Moon</td><td>Gales</td><td>Clouds</td><td>Rain</td></tr>
       <tr><td>Batallia_Downs</td><td>7</td><td>2026-10-06 19:43</td><td>Firesday</td><td>Full Moon</td><td>Heat Waves</td><td>Clouds</td><td>Rain</td></tr>
+      <tr><td>Batallia_Downs</td><td>14</td><td>2026-10-07 02:26</td><td>Firesday</td><td>Full Moon</td><td>Clouds</td><td>Gales</td><td>Rain</td></tr>
     </table>
     """
     n, c, r, row, diag = parse_today(sample, "Batallia_Downs")
@@ -550,6 +553,8 @@ def self_test():
     days, _ = parse_forecast_days(sample, "Batallia_Downs", max_day=7)
     assert days[1]["normal"] == "Gales"
     assert days[7]["normal"] == "Heat Waves"
+    further, _ = parse_forecast_days(sample, "Batallia_Downs", max_day=14)
+    assert further[14]["common"] == "Gales"
     assert source_url("Batallia Downs").endswith(
         "weatherTypeDropDown=8&zoneNameDropDown=Batallia_Downs"
     )
@@ -577,7 +582,7 @@ def main():
 
     url = f"http://127.0.0.1:{port}/"
     print()
-    print("HorizonXI Summoner Unlock Tracker v18")
+    print("HorizonXI Summoner Unlock Tracker v21")
     print("Browser URL:", url)
     print("Press Ctrl+C to stop.")
     print()

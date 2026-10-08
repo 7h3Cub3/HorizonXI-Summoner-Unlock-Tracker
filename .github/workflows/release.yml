@@ -24,6 +24,9 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install -r requirements-build.txt
 
+      - name: Test Wiki forecast row timing
+        run: node tests/test_forecast_timing.cjs
+
       - name: Build EXE
         run: python -m PyInstaller --noconfirm --clean HorizonXI_Summoner_Unlock_Tracker.spec
 

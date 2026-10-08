@@ -77,8 +77,9 @@
   .future-forecast-days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .future-day-card{border:1px solid #2d3a4b;border-radius:10px;background:#101720;overflow:hidden}
   .future-day-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 11px;background:#151f2b;border-bottom:1px solid #2d3a4b}
-  .future-day-title{font-weight:800;white-space:nowrap}
-  .future-day-countdown{font-size:11px;color:#aebaca;white-space:nowrap}
+  .future-day-title{font-weight:800;white-space:normal}
+  .future-source-offset{display:block;font-size:10px;font-weight:500;color:#9eacc0}
+  .future-day-countdown{font-size:11px;color:#aebaca;white-space:normal;text-align:right}
   .future-day-body{padding:6px 10px}
   .future-row{display:grid;grid-template-columns:minmax(118px,auto) minmax(150px,1fr) auto;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #222e3c}
   .future-row:last-child{border-bottom:0}
@@ -345,12 +346,13 @@
     <div id="scanStatus" class="status">Not scanned yet.</div>
     <div class="row" style="margin-top:9px">
       <span class="pill">Vana'diel: <b id="vanaClock">--:--</b></span>
-      <span class="pill">Today's forecast rolls over in: <b id="forecastCountdown">--:--:--</b></span>
+      <span class="pill">Next Wiki forecast row in: <b id="forecastCountdown">--:--:--</b></span>
       <span class="pill">Next automatic scan: <b id="scanCountdown">--:--:--</b></span>
     </div>
     <div class="tiny" style="margin-top:7px">
-      One Vana'diel day is 57m 36s of Earth time. The countdown is to the next Vana'diel midnight,
-      when the Wiki's <b>Today</b> forecast row advances. Actual zone weather can start or stop before then.
+      One Vana'diel day is 57m 36s of Earth time. Future timestamps correspond to the
+      <b>same offset rows as the Horizon Wiki</b>, without guessing an extra Vana'diel day or timezone correction.
+      A forecast day boundary is not the same as a change in live zone weather.
     </div>
     <div class="spacer"></div>
     <div class="access-rank-note" style="margin-bottom:10px">
@@ -374,12 +376,13 @@
       <div class="row" style="justify-content:space-between;align-items:center">
         <div>
           <h3 style="margin:0 0 3px 0">Next 7 Vana'diel Days</h3>
-          <div class="meta">Upcoming quest-weather opportunities for colors you still need. Day +1 begins at the next Vana'diel midnight.</div>
+          <div class="meta">The first seven future start times from the Wiki, ordered by Earth time. Expired source rows are hidden; original Wiki day offsets are shown under each title.</div>
         </div>
         <span class="pill">Horizon: <b>~6h 43m IRL</b></span>
       </div>
       <div class="spacer"></div>
       <div id="futureForecastStatus" class="tiny muted">Run a forecast scan.</div>
+      <div id="wikiTodayReference" class="note" style="margin-top:9px;margin-bottom:8px">Wiki Today row: waiting for scan.</div>
       <div class="spacer"></div>
       <div id="futureForecastDays" class="future-forecast-days"></div>
     </div>
@@ -633,6 +636,11 @@ let state = JSON.parse(localStorage.getItem(LS_KEY)||'{}');
 let settings = Object.assign({sound:false,auto:true,threshold:50,alertSound:'crystal'}, JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}'));
 let alertMemory = JSON.parse(localStorage.getItem(ALERT_KEY)||'{}');
 let autoTimer=null, titleTimer=null, clockTimer=null, nextScanAt=null;
+let wikiDayTimes={};
+let wikiTimeCalibrationNote='';
+let futureDisplayNextBoundaryMs=null;
+const MAX_WIKI_FUTURE_OFFSET=14;
+const VISIBLE_UPCOMING_DAYS=7;
 
 const VANA_DAY_MS = 57*60*1000 + 36*1000; // 57m 36s Earth time
 const VANA_EPOCH_MS = Date.UTC(2001,11,31,15,0,0); // 2002-01-01 00:00 JST
@@ -657,7 +665,7 @@ function renderCards(){
     root.appendChild(el);
   });
   root.querySelectorAll('input[type=checkbox]').forEach(x=>x.addEventListener('change',e=>{
-    state[e.target.dataset.id]=e.target.checked; save(); renderCards(); updateProgress(); filterLastOpportunities(); renderAllForecasts(window._lastForecasts||{});
+    state[e.target.dataset.id]=e.target.checked; save(); renderCards(); updateProgress(); filterLastOpportunities(); renderFutureForecasts(window._lastForecasts||{}); renderAllForecasts(window._lastForecasts||{});
   }));
 }
 let rubyDetailsForcedOpen=false;
@@ -910,7 +918,7 @@ async function fetchAllForecasts(){
   if(location.protocol==='file:'){
     throw new Error('Open this tracker through the EXE or run_source.bat, not by double-clicking the HTML file.');
   }
-  const r=await fetch('/api/forecasts',{cache:'no-store'});
+  const r=await fetch('/api/forecasts?fresh=1',{cache:'no-store'});
   let j=null;
   try{j=await r.json()}catch{}
   if(!r.ok) throw new Error((j&&j.error)?j.error:`Local weather helper returned HTTP ${r.status}`);
@@ -936,93 +944,209 @@ function vanaState(nowMs=Date.now()){
   const nextMidnight=nowMs+(VANA_DAY_MS-inDay);
   return {dayIndex,dayName:VANA_DAYS[((dayIndex%8)+8)%8],hour,minute,second,nextMidnight,toMidnight:nextMidnight-nowMs};
 }
+
+/*
+ * Wiki rows are indexed by their explicit offset (Today=0, Day +1=1, ...).
+ * Each row's Earth Time belongs to that row: do NOT reconstruct it by
+ * adding one Vana'diel day to Today or search for arbitrary timezone shifts.
+ * The horizon site describes its times as browser-local; display the source
+ * wall-clock string exactly, and parse it as local only for countdowns.
+ */
+const WIKI_MONTHS={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+function parseWikiEarthTimeLocal(value,nowMs=Date.now(),offset=0){
+  const s=String(value||'').trim();
+  if(!s)return NaN;
+  // ISO timestamps containing an explicit UTC offset remain absolute instants.
+  if(/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)$/i.test(s)){
+    const t=Date.parse(s.replace(' ','T'));
+    return Number.isFinite(t)?t:NaN;
+  }
+  let year=null,month=null,day=null,hour=null,minute=null,second=0,ampm=null;
+  let m=s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if(m){year=+m[1];month=+m[2]-1;day=+m[3];hour=+m[4];minute=+m[5];second=+(m[6]||0);ampm=m[7]||null;}
+  if(!m){
+    // Wiki's displayed format: "08-Oct 11:14 AM" (no year).
+    m=s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ,]*(\d{4})?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    if(m){
+      day=+m[1];month=WIKI_MONTHS[m[2].toLowerCase()];year=m[3]?+m[3]:null;
+      hour=+m[4];minute=+m[5];second=+(m[6]||0);ampm=m[7]||null;
+    }
+  }
+  if(month===null||month===undefined||day===null||hour===null||minute===null)return NaN;
+  if(month<0||month>11||day<1||day>31||minute>59||second>59)return NaN;
+  if(ampm){if(hour<1||hour>12)return NaN;hour=(hour%12)+(ampm.toUpperCase()==='PM'?12:0);}
+  else if(hour>23)return NaN;
+  function candidate(y){
+    const d=new Date(y,month,day,hour,minute,second,0);
+    return d.getFullYear()===y&&d.getMonth()===month&&d.getDate()===day?d.getTime():NaN;
+  }
+  if(year!==null)return candidate(year);
+  // Yearless Wiki dates can cross New Year; pick nearest plausible year.
+  const currentYear=new Date(nowMs).getFullYear();
+  let best=NaN,dist=Infinity;
+  for(const y of [currentYear-1,currentYear,currentYear+1]){
+    const ts=candidate(y);
+    const delta=Math.abs(ts-(nowMs+offset*VANA_DAY_MS));
+    if(Number.isFinite(ts)&&delta<dist){best=ts;dist=delta;}
+  }
+  return best;
+}
+function setWikiForecastRowTimes(forecasts,nowMs=Date.now()){
+  wikiDayTimes={};
+  // Prefer a stable, easily verifiable zone as reference; all zones share
+  // the same Wiki day offsets. Other zones are used as fallbacks.
+  const entries=Object.entries(forecasts||{}).sort((a,b)=>{
+    const ap=a[0]==='Buburimu Peninsula'?0:1;
+    const bp=b[0]==='Buburimu Peninsula'?0:1;
+    return ap-bp||a[0].localeCompare(b[0]);
+  });
+  for(const [zone,f] of entries){
+    if(!f||f.error)continue;
+    const rows=[{offset:0,earth_time:f.earth_time},...(Array.isArray(f.future)?f.future:[])];
+    for(const row of rows){
+      const offset=+row.offset;
+      if(!Number.isInteger(offset)||offset<0||offset>MAX_WIKI_FUTURE_OFFSET||wikiDayTimes[offset])continue;
+      const raw=String(row.earth_time||'').trim();
+      if(!raw)continue;
+      const ts=parseWikiEarthTimeLocal(raw,nowMs,offset);
+      wikiDayTimes[offset]={ts,raw,zone,offset};
+    }
+  }
+  const today=wikiDayTimes[0];
+  const ref=document.getElementById('wikiTodayReference');
+  if(ref){
+    ref.textContent=today
+      ? `Wiki "Today" (offset 0): ${today.zone} — ${today.raw}. Day +1 is a different row, normally ~57m36s later.`
+      : 'Wiki "Today" timestamp was not returned by the weather helper.';
+  }
+  const valid=Object.values(wikiDayTimes).filter(x=>Number.isFinite(x.ts)).length;
+  wikiTimeCalibrationNote=`${valid} Wiki row timestamps parsed; source times displayed unchanged.`;
+}
+function nextWikiForecastRowMs(nowMs=Date.now()){
+  const future=Object.values(wikiDayTimes).map(x=>x.ts)
+    .filter(x=>Number.isFinite(x)&&x>nowMs+1000).sort((a,b)=>a-b);
+  return future.length?future[0]:NaN;
+}
+function futureDayStartMs(offset){
+  return wikiDayTimes[offset] ? wikiDayTimes[offset].ts : NaN;
+}
+function futureDayName(offset,nowMs=Date.now()){
+  const v=vanaState(nowMs);
+  return VANA_DAYS[(((v.dayIndex+offset)%8)+8)%8];
+}
+function futureDayTimeLabel(offset){
+  const row=wikiDayTimes[offset];
+  return row ? row.raw : 'Time unavailable';
+}
+// A Wiki offset is a source row ID, NOT a promise that its time is in the future.
+// Sort by the real Earth timestamp and keep only rows that have not begun yet.
+function getUpcomingWikiRows(nowMs=Date.now(),limit=VISIBLE_UPCOMING_DAYS){
+  return Object.values(wikiDayTimes)
+    .filter(row=>row && Number.isFinite(row.ts) && row.ts>nowMs)
+    .sort((a,b)=>a.ts-b.ts || a.offset-b.offset)
+    .slice(0,limit);
+}
+function updateFutureCountdowns(){
+  const now=Date.now();
+  // Keep the forecast future-only even while the page remains open with
+  // automatic scans turned off. Rebuild from the cached rows at a rollover.
+  if(Number.isFinite(futureDisplayNextBoundaryMs) && now>=futureDisplayNextBoundaryMs){
+    futureDisplayNextBoundaryMs=null;
+    if(window._lastForecasts)renderFutureForecasts(window._lastForecasts);
+    return;
+  }
+  document.querySelectorAll('[data-future-day-offset]').forEach(el=>{
+    const offset=+el.dataset.futureDayOffset;
+    const t=futureDayStartMs(offset);
+    const raw=futureDayTimeLabel(offset);
+    if(!Number.isFinite(t) || t<=now){
+      // Do not display 'started X ago' inside the future forecast.
+      el.closest('.future-day-card')?.remove();
+    }else{
+      el.textContent=`${raw} · starts in ${fmtDuration(t-now)}`;
+    }
+  });
+}
 function updateCountdowns(){
   const now=Date.now(), v=vanaState(now);
   const clock=document.getElementById('vanaClock');
   const fc=document.getElementById('forecastCountdown');
   const sc=document.getElementById('scanCountdown');
   if(clock)clock.textContent=`${v.dayName} ${pad2(v.hour)}:${pad2(v.minute)}:${pad2(v.second)}`;
-  if(fc)fc.textContent=fmtDuration(v.toMidnight);
+  const next=nextWikiForecastRowMs(now);
+  if(fc)fc.textContent=Number.isFinite(next)?fmtDuration(next-now):'--:--:--';
   if(sc){
     if(!settings.auto) sc.textContent='OFF';
-    else if(nextScanAt) sc.textContent=fmtDuration(Math.max(0,nextScanAt-now));
+    else if(nextScanAt)sc.textContent=fmtDuration(Math.max(0,nextScanAt-now));
     else sc.textContent='scheduling…';
   }
-  document.querySelectorAll('.forecastResetCountdown').forEach(x=>x.textContent=fmtDuration(v.toMidnight));
+  document.querySelectorAll('.forecastResetCountdown').forEach(x=>{
+    x.textContent=Number.isFinite(next)?fmtDuration(next-now):'--:--:--';
+  });
   updateFutureCountdowns();
 }
 
-function futureDayStartMs(offset,nowMs=Date.now()){
-  const v=vanaState(nowMs);
-  return nowMs+v.toMidnight+Math.max(0,offset-1)*VANA_DAY_MS;
-}
-function futureDayName(offset,nowMs=Date.now()){
-  const v=vanaState(nowMs);
-  return VANA_DAYS[(((v.dayIndex+offset)%8)+8)%8];
-}
-function updateFutureCountdowns(){
-  const now=Date.now();
-  document.querySelectorAll('[data-future-day-offset]').forEach(el=>{
-    const offset=+el.dataset.futureDayOffset;
-    if(!Number.isFinite(offset))return;
-    el.textContent='starts in '+fmtDuration(Math.max(0,futureDayStartMs(offset,now)-now));
-  });
-}
 function renderFutureForecasts(forecasts){
   const host=document.getElementById('futureForecastDays');
   const status=document.getElementById('futureForecastStatus');
   if(!host || !status)return;
 
   host.innerHTML='';
-  const byDay=Object.fromEntries(Array.from({length:7},(_,i)=>[i+1,[]]));
-  let futureRowsSeen=0;
+  futureDisplayNextBoundaryMs=null;
+  const now=Date.now();
+  const upcoming=getUpcomingWikiRows(now,VISIBLE_UPCOMING_DAYS);
+  // These Wiki offsets have already begun, so they must not be presented as
+  // *future* weather days even if their source labels are +1, +2, etc.
+  const pastOffsets=Object.values(wikiDayTimes).filter(row=>
+    Number.isFinite(row.ts)&&row.ts<=now).length;
 
+  if(!upcoming.length){
+    status.textContent='No future Wiki forecast row is available. Run a new scan to load upcoming days.';
+    host.innerHTML='<div class="future-empty">The returned forecast timestamps are all in the past or unavailable. No past-day cards are shown.</div>';
+    return;
+  }
+
+  const byDay=new Map(upcoming.map(x=>[x.offset,[]]));
   Object.entries(forecasts||{}).forEach(([zone,f])=>{
-    if(!f || f.error || !Array.isArray(f.future))return;
-    f.future.forEach(day=>{
+    if(!f || f.error)return;
+    const rows=[{offset:0,normal:f.normal,common:f.common,rare:f.rare,vana_day:f.vana_day},
+      ...(Array.isArray(f.future)?f.future:[])];
+    rows.forEach(day=>{
       const offset=+day.offset;
-      if(offset<1 || offset>7)return;
-      futureRowsSeen++;
+      if(!byDay.has(offset))return;
       const vals=[day.normal||'',day.common||'',day.rare||''];
       COLORS.forEach(color=>{
         if(state[color.id])return;
         const hit=chanceFor(color,vals);
         if(hit.chance<=0)return;
-        byDay[offset].push({
-          offset,
-          zone,
-          color,
-          chance:hit.chance,
-          hits:hit.hits,
-          vanaDay:day.vana_day||futureDayName(offset),
-          earthTime:day.earth_time||'',
-          vals
+        byDay.get(offset).push({
+          offset,zone,color,chance:hit.chance,hits:hit.hits,
+          vanaDay:day.vana_day||'',vals
         });
       });
     });
   });
 
   const colorOrder=Object.fromEntries(COLORS.map((c,i)=>[c.id,i]));
-
-  for(let offset=1;offset<=7;offset++){
-    let rows=byDay[offset];
+  upcoming.forEach((wikiRow,i)=>{
+    const offset=wikiRow.offset;
+    let rows=byDay.get(offset)||[];
     const card=document.createElement('div');
     card.className='future-day-card';
-
-    const wikiDay=rows.length && rows[0].vanaDay ? rows[0].vanaDay : futureDayName(offset);
+    const wikiDay=rows.length&&rows[0].vanaDay?rows[0].vanaDay:'Vana day';
+    const sourceLabel=offset===0?'Wiki Today':`Wiki Day +${offset}`;
     card.innerHTML=`<div class="future-day-head">
-      <span class="future-day-title">Day +${offset} · ${wikiDay}</span>
-      <span class="future-day-countdown" data-future-day-offset="${offset}">starts in --:--:--</span>
+      <span class="future-day-title">Upcoming ${i+1} · ${wikiDay}<span class="future-source-offset">${sourceLabel}</span></span>
+      <span class="future-day-countdown" data-future-day-offset="${offset}">${futureDayTimeLabel(offset)}</span>
     </div><div class="future-day-body"></div>`;
     const body=card.querySelector('.future-day-body');
 
     if(!rows.length){
       body.innerHTML='<div class="future-empty">No missing quest color forecast in tracked zones.</div>';
       host.appendChild(card);
-      continue;
+      return;
     }
 
-    // Keep all eligible zones, but put best travel access first inside each color/day.
     const ranking=bestAccessByColor(rows);
     rows=[...rows].sort((a,b)=>{
       const co=colorOrder[a.color.id]-colorOrder[b.color.id];
@@ -1034,7 +1158,6 @@ function renderFutureForecasts(forecasts){
       if(a.chance!==b.chance)return b.chance-a.chance;
       return a.zone.localeCompare(b.zone);
     });
-
     rows.forEach(r=>{
       const best=isBestAccessRow(r,ranking);
       const row=document.createElement('div');
@@ -1044,18 +1167,16 @@ function renderFutureForecasts(forecasts){
         <div class="future-chance">${r.chance}%</div>`;
       body.appendChild(row);
     });
-
     host.appendChild(card);
-  }
+  });
 
-  if(!futureRowsSeen){
-    status.textContent='No future forecast rows were returned by the weather source.';
-  }else{
-    const total=Object.values(byDay).reduce((n,rows)=>n+rows.length,0);
-    status.textContent=total
-      ? `${total} upcoming quest-weather matches across the next 7 Vana'diel days. Completed colors are hidden.`
-      : 'No upcoming forecast matches for your remaining colors in the next 7 Vana’diel days.';
-  }
+  futureDisplayNextBoundaryMs=upcoming[0].ts;
+  const total=Array.from(byDay.values()).reduce((n,rows)=>n+rows.length,0);
+  const details=[];
+  details.push(`${upcoming.length} upcoming Vana'diel days displayed${upcoming.length<VISIBLE_UPCOMING_DAYS?' (fewer rows available from Wiki)':''}.`);
+  if(pastOffsets)details.push(`${pastOffsets} expired source row${pastOffsets===1?'':'s'} hidden.`);
+  details.push(`${total} quest-weather matches for colors still needed.`);
+  status.textContent=details.join(' ');
   updateFutureCountdowns();
 }
 
@@ -1120,6 +1241,7 @@ async function scan(){
     });
     lastResults.sort((a,b)=>b.chance-a.chance||a.color.name.localeCompare(b.color.name)||a.zone.localeCompare(b.zone));
     window._lastForecasts=forecasts;
+    setWikiForecastRowTimes(forecasts,Date.now());
     const stamp=new Date().toLocaleString();
     status.textContent=`Last scan: ${stamp}. ${ok}/${zones.length} zones parsed${failed?`; ${failed} failed`:''}${payload.cached?' (Vana-day cache)':''}.`;
     filterLastOpportunities(true);
@@ -1187,8 +1309,8 @@ function scheduleAuto(){
   clearTimeout(autoTimer);
   nextScanAt=null;
   if(settings.auto){
-    const v=vanaState(Date.now());
-    nextScanAt=v.nextMidnight+5000;
+    const next=nextWikiForecastRowMs(Date.now());
+    nextScanAt=Number.isFinite(next) ? next+5000 : Date.now()+180000;
     autoTimer=setTimeout(scan,Math.max(1000,nextScanAt-Date.now()));
   }
   updateCountdowns();
